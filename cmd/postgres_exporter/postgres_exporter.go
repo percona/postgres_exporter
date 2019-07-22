@@ -1470,17 +1470,14 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) innerHandler(filters ...string) (http.Handler, error) {
-	// clear all previously registered collector (to prevent repeatable registration).
-	for k, v := range h.collectors {
-		if ok := prometheus.Unregister(v); ok {
-			log.Infof("Collector '%s' was unregistered", k)
-		}
-	}
+	registry := prometheus.NewRegistry()
+	registry.MustRegister(prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
+	registry.MustRegister(prometheus.NewGoCollector())
 
 	// register all collectors by default.
 	if len(filters) == 0 {
 		for name, c := range h.collectors {
-			if err := prometheus.Register(c); err != nil {
+			if err := registry.Register(c); err != nil {
 				return nil, err
 			}
 			log.Infof("Collector '%s' was registered", name)
@@ -1490,7 +1487,7 @@ func (h *handler) innerHandler(filters ...string) (http.Handler, error) {
 	// register only filtered collectors.
 	for _, name := range filters {
 		if c, ok := h.collectors[name]; ok {
-			if err := prometheus.Register(c); err != nil {
+			if err := registry.Register(c); err != nil {
 				return nil, err
 			}
 			log.Infof("Collector '%s' was registered", name)
@@ -1498,7 +1495,7 @@ func (h *handler) innerHandler(filters ...string) (http.Handler, error) {
 	}
 
 	handler := promhttp.HandlerFor(
-		prometheus.DefaultGatherer,
+		registry,
 		promhttp.HandlerOpts{
 			ErrorLog:      log.NewErrorLogger(),
 			ErrorHandling: promhttp.ContinueOnError,
