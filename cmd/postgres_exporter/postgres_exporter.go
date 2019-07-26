@@ -1440,11 +1440,14 @@ type handler struct {
 
 func newHandler(collectors map[string]prometheus.Collector) *handler {
 	h := &handler{collectors: collectors}
-	if innerHandler, err := h.innerHandler(); err != nil {
+
+	innerHandler, err := h.innerHandler()
+	if err != nil {
 		log.Fatalf("Couldn't create metrics handler: %s", err)
-	} else {
-		h.unfilteredHandler = innerHandler
+		return h
 	}
+
+	h.unfilteredHandler = innerHandler
 	return h
 }
 
@@ -1480,7 +1483,7 @@ func (h *handler) innerHandler(filters ...string) (http.Handler, error) {
 			if err := registry.Register(c); err != nil {
 				return nil, err
 			}
-			log.Infof("Collector '%s' was registered", name)
+			log.Debugf("Collector %q was registered", name)
 		}
 	}
 
@@ -1490,7 +1493,7 @@ func (h *handler) innerHandler(filters ...string) (http.Handler, error) {
 			if err := registry.Register(c); err != nil {
 				return nil, err
 			}
-			log.Infof("Collector '%s' was registered", name)
+			log.Debugf("Collector %q was registered", name)
 		}
 	}
 
