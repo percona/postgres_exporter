@@ -1444,7 +1444,6 @@ func newHandler(collectors map[string]prometheus.Collector) *handler {
 	innerHandler, err := h.innerHandler()
 	if err != nil {
 		log.Fatalf("Couldn't create metrics handler: %s", err)
-		return h
 	}
 
 	h.unfilteredHandler = innerHandler
