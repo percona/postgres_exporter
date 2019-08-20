@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strconv"
@@ -34,14 +35,16 @@ import (
 var Version = "0.0.1"
 
 var (
-	listenAddress          = kingpin.Flag("web.listen-address", "Address to listen on for web interface and telemetry.").Default(":9187").Envar("PG_EXPORTER_WEB_LISTEN_ADDRESS").String()
-	metricPath             = kingpin.Flag("web.telemetry-path", "Path under which to expose metrics.").Default("/metrics").Envar("PG_EXPORTER_WEB_TELEMETRY_PATH").String()
-	disableDefaultMetrics  = kingpin.Flag("disable-default-metrics", "Do not include default metrics.").Default("false").Envar("PG_EXPORTER_DISABLE_DEFAULT_METRICS").Bool()
-	disableSettingsMetrics = kingpin.Flag("disable-settings-metrics", "Do not include pg_settings metrics.").Default("false").Envar("PG_EXPORTER_DISABLE_SETTINGS_METRICS").Bool()
-	autoDiscoverDatabases  = kingpin.Flag("auto-discover-databases", "Whether to discover the databases on a server dynamically.").Default("false").Envar("PG_EXPORTER_AUTO_DISCOVER_DATABASES").Bool()
-	queriesPath            = kingpin.Flag("extend.query-path", "Path to custom queries to run.").Default("").Envar("PG_EXPORTER_EXTEND_QUERY_PATH").String()
-	onlyDumpMaps           = kingpin.Flag("dumpmaps", "Do not run, simply dump the maps.").Bool()
-	constantLabelsList     = kingpin.Flag("constantLabels", "A list of label=value separated by comma(,).").Default("").Envar("PG_EXPORTER_CONSTANT_LABELS").String()
+	listenAddress                 = kingpin.Flag("web.listen-address", "Address to listen on for web interface and telemetry.").Default(":9187").Envar("PG_EXPORTER_WEB_LISTEN_ADDRESS").String()
+	metricPath                    = kingpin.Flag("web.telemetry-path", "Path under which to expose metrics.").Default("/metrics").Envar("PG_EXPORTER_WEB_TELEMETRY_PATH").String()
+	disableDefaultMetrics         = kingpin.Flag("disable-default-metrics", "Do not include default metrics.").Default("false").Envar("PG_EXPORTER_DISABLE_DEFAULT_METRICS").Bool()
+	disableSettingsMetrics        = kingpin.Flag("disable-settings-metrics", "Do not include pg_settings metrics.").Default("false").Envar("PG_EXPORTER_DISABLE_SETTINGS_METRICS").Bool()
+	autoDiscoverDatabases         = kingpin.Flag("auto-discover-databases", "Whether to discover the databases on a server dynamically.").Default("false").Envar("PG_EXPORTER_AUTO_DISCOVER_DATABASES").Bool()
+	onlyDumpMaps                  = kingpin.Flag("dumpmaps", "Do not run, simply dump the maps.").Bool()
+	constantLabelsList            = kingpin.Flag("constantLabels", "A list of label=value separated by comma(,).").Default("").Envar("PG_EXPORTER_CONSTANT_LABELS").String()
+	collectCustomQueryLrDirectory = kingpin.Flag("collect.custom_query.lr.directory", "Path to custom queries with low resolution directory.").Default("/usr/local/percona/pmm-client/custom-queries/postgres/low-resolution").Envar("PG_EXPORTER_EXTEND_QUERY_LR_PATH").String()
+	collectCustomQueryMrDirectory = kingpin.Flag("collect.custom_query.mr.directory", "Path to custom queries with medium resolution directory.").Default("/usr/local/percona/pmm-client/custom-queries/postgres/medium-resolution").Envar("PG_EXPORTER_EXTEND_QUERY_MR_PATH").String()
+	collectCustomQueryHrDirectory = kingpin.Flag("collect.custom_query.hr.directory", "Path to custom queries with high resolution directory.").Default("/usr/local/percona/pmm-client/custom-queries/postgres/high-resolution").Envar("PG_EXPORTER_EXTEND_QUERY_HR_PATH").String()
 )
 
 // Metric name parts.
@@ -60,6 +63,14 @@ const (
 func init() {
 	prometheus.MustRegister(version.NewCollector("postgres_exporter"))
 }
+
+type MetricResolution string
+
+const (
+	LR MetricResolution = "lr"
+	MR MetricResolution = "mr"
+	HR MetricResolution = "hr"
+)
 
 // ColumnUsage should be one of several enum values which describe how a
 // queried row is to be converted to a Prometheus metric.
@@ -891,7 +902,7 @@ type Exporter struct {
 	disableDefaultMetrics, disableSettingsMetrics, autoDiscoverDatabases bool
 
 	dsn              []string
-	userQueriesPath  string
+	userQueriesPath  map[MetricResolution]string
 	constantLabels   prometheus.Labels
 	duration         prometheus.Gauge
 	error            prometheus.Gauge
@@ -929,7 +940,7 @@ func AutoDiscoverDatabases(b bool) ExporterOpt {
 }
 
 // WithUserQueriesPath configures user's queries path.
-func WithUserQueriesPath(p string) ExporterOpt {
+func WithUserQueriesPath(p map[MetricResolution]string) ExporterOpt {
 	return func(e *Exporter) {
 		e.userQueriesPath = p
 	}
@@ -1246,27 +1257,13 @@ func (e *Exporter) checkMapVersions(ch chan<- prometheus.Metric, server *Server)
 
 		server.lastMapVersion = semanticVersion
 
-		if e.userQueriesPath != "" {
+		if e.userQueriesPath[HR] != "" || e.userQueriesPath[MR] != "" || e.userQueriesPath[LR] != "" {
 			// Clear the metric while a reload is happening
 			e.userQueriesError.Reset()
-
-			// Calculate the hashsum of the useQueries
-			userQueriesData, err := ioutil.ReadFile(e.userQueriesPath)
-			if err != nil {
-				log.Errorln("Failed to reload user queries:", e.userQueriesPath, err)
-				e.userQueriesError.WithLabelValues(e.userQueriesPath, "").Set(1)
-			} else {
-				hashsumStr := fmt.Sprintf("%x", sha256.Sum256(userQueriesData))
-
-				if err := addQueries(userQueriesData, semanticVersion, server); err != nil {
-					log.Errorln("Failed to reload user queries:", e.userQueriesPath, err)
-					e.userQueriesError.WithLabelValues(e.userQueriesPath, hashsumStr).Set(1)
-				} else {
-					// Mark user queries as successfully loaded
-					e.userQueriesError.WithLabelValues(e.userQueriesPath, hashsumStr).Set(0)
-				}
-			}
 		}
+		e.loadCustomQueries(HR, semanticVersion, server)
+		e.loadCustomQueries(MR, semanticVersion, server)
+		e.loadCustomQueries(LR, semanticVersion, server)
 
 		server.mappingMtx.Unlock()
 	}
@@ -1280,6 +1277,48 @@ func (e *Exporter) checkMapVersions(ch chan<- prometheus.Metric, server *Server)
 			prometheus.UntypedValue, 1, versionString, semanticVersion.String())
 	}
 	return nil
+}
+
+func (e *Exporter) loadCustomQueries(res MetricResolution, version semver.Version, server *Server) {
+	if e.userQueriesPath[res] != "" {
+		fi, err := ioutil.ReadDir(e.userQueriesPath[res])
+		if err != nil {
+			log.Errorf("failed read dir %q for custom query. reason: %s", e.userQueriesPath[res], err)
+			return
+		}
+
+		for _, v := range fi {
+			if v.IsDir() {
+				continue
+			}
+
+			if filepath.Ext(v.Name()) == ".yml" || filepath.Ext(v.Name()) == ".yaml" {
+				path := filepath.Join(e.userQueriesPath[res], v.Name())
+				e.addCustomQueriesFromFile(path, version, server)
+			}
+		}
+	}
+}
+
+func (e *Exporter) addCustomQueriesFromFile(path string, version semver.Version, server *Server) {
+	// Calculate the hashsum of the useQueries
+	userQueriesData, err := ioutil.ReadFile(path)
+	if err != nil {
+		log.Errorln("Failed to reload user queries:", path, err)
+		e.userQueriesError.WithLabelValues(path, "").Set(1)
+		return
+	}
+
+	hashsumStr := fmt.Sprintf("%x", sha256.Sum256(userQueriesData))
+
+	if err := addQueries(userQueriesData, version, server); err != nil {
+		log.Errorln("Failed to reload user queries:", path, err)
+		e.userQueriesError.WithLabelValues(path, hashsumStr).Set(1)
+		return
+	}
+
+	// Mark user queries as successfully loaded
+	e.userQueriesError.WithLabelValues(path, hashsumStr).Set(0)
 }
 
 func (e *Exporter) scrape(ch chan<- prometheus.Metric) {
@@ -1414,11 +1453,17 @@ func main() {
 		log.Fatal("couldn't find environment variables describing the datasource to use")
 	}
 
+	queriesPath := map[MetricResolution]string{
+		HR: *collectCustomQueryHrDirectory,
+		MR: *collectCustomQueryMrDirectory,
+		LR: *collectCustomQueryLrDirectory,
+	}
+
 	exporter := NewExporter(dsn,
 		DisableDefaultMetrics(*disableDefaultMetrics),
 		DisableSettingsMetrics(*disableSettingsMetrics),
 		AutoDiscoverDatabases(*autoDiscoverDatabases),
-		WithUserQueriesPath(*queriesPath),
+		WithUserQueriesPath(queriesPath),
 		WithConstantLabels(*constantLabelsList),
 	)
 	defer func() {
