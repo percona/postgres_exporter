@@ -3,6 +3,7 @@
 package main
 
 import (
+	"database/sql"
 	"os"
 	"reflect"
 	"testing"
@@ -153,6 +154,49 @@ func (s *FunctionalSuite) TestEnvironmentSettingWithDnsAndSecrets(c *C) {
 	if dsn[0] != envDsn {
 		c.Errorf("Expected Username to be read from file. Found=%v, expected=%v", dsn[0], envDsn)
 	}
+}
+
+// test DSN including SSL enabled
+func (s *FunctionalSuite) TestSSL(c *C) {
+	// Thr driver doesn't support sslmode=prefer
+	envDsn := "postgresql://root:root@localhost:5433/?sslmode=require&sslcert=../../docker/server.crt&sslkey=../../docker/server.key"
+	err := os.Setenv("DATA_SOURCE_NAME", envDsn)
+	c.Assert(err, IsNil)
+	defer UnsetEnvironment(c, "DATA_SOURCE_NAME")
+
+	server, err := NewServer(envDsn)
+	c.Assert(err, IsNil)
+	c.Assert(server, NotNil)
+
+	// Just to check getDataSources can handle ssl options
+	dsn := getDataSources()
+	if len(dsn) == 0 {
+		c.Errorf("Expected one data source, zero found")
+	}
+	if dsn[0] != envDsn {
+		c.Errorf("Expected Username to be read from file. Found=%v, expected=%v", dsn[0], envDsn)
+	}
+
+	type row struct {
+		Pid         int    // pid
+		Ssl         bool   // ssl
+		Version     string // version
+		Cipher      string // cipher
+		Bits        int    // bits
+		Compression bool   // compression
+		Clientdn    string // clientdn
+	}
+	res := row{}
+
+	db, err := sql.Open("postgres", dsn[0])
+	c.Assert(err, IsNil)
+
+	// This query returns information about the current connection. Ssl field should be true
+	sqlstr := "SELECT * FROM pg_stat_ssl WHERE pid=pg_backend_pid()"
+	err = db.QueryRow(sqlstr).Scan(&res.Pid, &res.Ssl, &res.Version, &res.Cipher, &res.Bits, &res.Compression, &res.Clientdn)
+	c.Assert(err, IsNil)
+	c.Assert(res.Ssl, Equals, true)
+	c.Assert(db.Close(), IsNil)
 }
 
 func (s *FunctionalSuite) TestPostgresVersionParsing(c *C) {
