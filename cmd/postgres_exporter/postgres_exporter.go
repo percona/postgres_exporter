@@ -42,6 +42,9 @@ var (
 	autoDiscoverDatabases         = kingpin.Flag("auto-discover-databases", "Whether to discover the databases on a server dynamically.").Default("false").Envar("PG_EXPORTER_AUTO_DISCOVER_DATABASES").Bool()
 	onlyDumpMaps                  = kingpin.Flag("dumpmaps", "Do not run, simply dump the maps.").Bool()
 	constantLabelsList            = kingpin.Flag("constantLabels", "A list of label=value separated by comma(,).").Default("").Envar("PG_EXPORTER_CONSTANT_LABELS").String()
+	collectCustomQueryLr          = kingpin.Flag("collect.custom_query.lr", "Enable custom queries with low resolution directory.").Default("false").Envar("PG_EXPORTER_EXTEND_QUERY_LR").Bool()
+	collectCustomQueryMr          = kingpin.Flag("collect.custom_query.mr", "Enable custom queries with medium resolution directory.").Default("false").Envar("PG_EXPORTER_EXTEND_QUERY_MR").Bool()
+	collectCustomQueryHr          = kingpin.Flag("collect.custom_query.hr", "Enable custom queries with high resolution directory.").Default("false").Envar("PG_EXPORTER_EXTEND_QUERY_HR").Bool()
 	collectCustomQueryLrDirectory = kingpin.Flag("collect.custom_query.lr.directory", "Path to custom queries with low resolution directory.").Default("/usr/local/percona/pmm-client/custom-queries/postgres/low-resolution").Envar("PG_EXPORTER_EXTEND_QUERY_LR_PATH").String()
 	collectCustomQueryMrDirectory = kingpin.Flag("collect.custom_query.mr.directory", "Path to custom queries with medium resolution directory.").Default("/usr/local/percona/pmm-client/custom-queries/postgres/medium-resolution").Envar("PG_EXPORTER_EXTEND_QUERY_MR_PATH").String()
 	collectCustomQueryHrDirectory = kingpin.Flag("collect.custom_query.hr.directory", "Path to custom queries with high resolution directory.").Default("/usr/local/percona/pmm-client/custom-queries/postgres/high-resolution").Envar("PG_EXPORTER_EXTEND_QUERY_HR_PATH").String()
@@ -901,14 +904,15 @@ type Exporter struct {
 
 	disableDefaultMetrics, disableSettingsMetrics, autoDiscoverDatabases bool
 
-	dsn              []string
-	userQueriesPath  map[MetricResolution]string
-	constantLabels   prometheus.Labels
-	duration         prometheus.Gauge
-	error            prometheus.Gauge
-	psqlUp           prometheus.Gauge
-	userQueriesError *prometheus.GaugeVec
-	totalScrapes     prometheus.Counter
+	dsn                []string
+	userQueriesPath    map[MetricResolution]string
+	userQueriesEnabled map[MetricResolution]bool
+	constantLabels     prometheus.Labels
+	duration           prometheus.Gauge
+	error              prometheus.Gauge
+	psqlUp             prometheus.Gauge
+	userQueriesError   *prometheus.GaugeVec
+	totalScrapes       prometheus.Counter
 
 	// servers are used to allow re-using the DB connection between scrapes.
 	// servers contains metrics map and query overrides.
@@ -943,6 +947,13 @@ func AutoDiscoverDatabases(b bool) ExporterOpt {
 func WithUserQueriesPath(p map[MetricResolution]string) ExporterOpt {
 	return func(e *Exporter) {
 		e.userQueriesPath = p
+	}
+}
+
+// WithUserQueriesPath configures user's queries path.
+func WithUserQueriesEnabled(p map[MetricResolution]bool) ExporterOpt {
+	return func(e *Exporter) {
+		e.userQueriesEnabled = p
 	}
 }
 
@@ -1261,9 +1272,12 @@ func (e *Exporter) checkMapVersions(ch chan<- prometheus.Metric, server *Server)
 			// Clear the metric while a reload is happening
 			e.userQueriesError.Reset()
 		}
-		e.loadCustomQueries(HR, semanticVersion, server)
-		e.loadCustomQueries(MR, semanticVersion, server)
-		e.loadCustomQueries(LR, semanticVersion, server)
+
+		for res := range e.userQueriesPath {
+			if e.userQueriesEnabled[res] {
+				e.loadCustomQueries(res, semanticVersion, server)
+			}
+		}
 
 		server.mappingMtx.Unlock()
 	}
@@ -1453,6 +1467,12 @@ func main() {
 		log.Fatal("couldn't find environment variables describing the datasource to use")
 	}
 
+	queriesEnabled := map[MetricResolution]bool{
+		HR: *collectCustomQueryHr,
+		MR: *collectCustomQueryMr,
+		LR: *collectCustomQueryLr,
+	}
+
 	queriesPath := map[MetricResolution]string{
 		HR: *collectCustomQueryHrDirectory,
 		MR: *collectCustomQueryMrDirectory,
@@ -1463,6 +1483,7 @@ func main() {
 		DisableDefaultMetrics(*disableDefaultMetrics),
 		DisableSettingsMetrics(*disableSettingsMetrics),
 		AutoDiscoverDatabases(*autoDiscoverDatabases),
+		WithUserQueriesEnabled(queriesEnabled),
 		WithUserQueriesPath(queriesPath),
 		WithConstantLabels(*constantLabelsList),
 	)
