@@ -12,6 +12,7 @@ env:
 - POSTGRESQL_IMAGE=postgres:9.6
 - POSTGRESQL_IMAGE=postgres:10
 - POSTGRESQL_IMAGE=postgres:11
+- POSTGRESQL_IMAGE=postgres:12
 
 services:
 - docker
@@ -19,6 +20,8 @@ services:
 go_import_path: github.com/percona/postgres_exporter
 
 before_script:
+- chmod 0600 docker/server.* docker/rootCA.key
+
 - sudo service postgresql stop
 - docker --version
 - docker-compose --version
