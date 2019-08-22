@@ -10,7 +10,7 @@ services:
       - POSTGRES_USER=root
 
   postgresql-ssl:
-    image: ${POSTGRESQL_IMAGE:-postgres}
+    image: ${POSTGRESQL_IMAGE:-postgres}:9.5
     container_name: postgres_exporter_postgresql-ssl
     command: >
       -c ssl=on

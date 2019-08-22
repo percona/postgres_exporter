@@ -192,7 +192,7 @@ func (s *FunctionalSuite) TestSSL(c *C) {
 	c.Assert(err, IsNil)
 
 	// This query returns information about the current connection. Ssl field should be true
-	sqlstr := "SELECT * FROM pg_stat_ssl WHERE pid=pg_backend_pid()"
+	sqlstr := "SELECT pid, ssl, version, cipher, bits, compression, clientdn FROM pg_stat_ssl WHERE pid=pg_backend_pid()"
 	err = db.QueryRow(sqlstr).Scan(&res.Pid, &res.Ssl, &res.Version, &res.Cipher, &res.Bits, &res.Compression, &res.Clientdn)
 	c.Assert(err, IsNil)
 	c.Assert(res.Ssl, Equals, true)
