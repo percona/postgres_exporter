@@ -190,13 +190,11 @@ func (s *FunctionalSuite) TestSSL(c *C) {
 
 	db, err := sql.Open("postgres", dsn[0])
 	c.Assert(err, IsNil)
-	v95 := semver.MustParse("9.5.0")
+	//v95 := semver.MustParse("9.5.0")
 	version, err := postgresVersion(db)
 	c.Assert(err, IsNil)
-
-	pgVersion := semver.MustParse(version)
-	if pgVersion.LT(v95) {
-		c.Skip("This test is valid only on PostgreSQL 9.5+")
+	if version < 90500 {
+		c.Skip("This test needs PostgreSQL 9.5+")
 	}
 
 	// This query returns information about the current connection. Ssl field should be true
@@ -354,8 +352,8 @@ func (s *FunctionalSuite) TestBooleanConversionToValueAndString(c *C) {
 	}
 }
 
-func postgresVersion(db *sql.DB) (string, error) {
-	version := ""
-	err := db.QueryRow("SHOW server_version").Scan(&version)
+func postgresVersion(db *sql.DB) (int, error) {
+	version := 0
+	err := db.QueryRow("SHOW server_version_num").Scan(&version)
 	return version, err
 }
