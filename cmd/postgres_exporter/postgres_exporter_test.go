@@ -159,7 +159,7 @@ func (s *FunctionalSuite) TestEnvironmentSettingWithDnsAndSecrets(c *C) {
 // test DSN including SSL enabled
 func (s *FunctionalSuite) TestSSL(c *C) {
 	// Thr driver doesn't support sslmode=prefer
-	envDsn := "postgresql://root:root@localhost:5433/?sslmode=require"
+	envDsn := "postgresql://root:root@localhost:5432/?sslmode=require"
 	err := os.Setenv("DATA_SOURCE_NAME", envDsn)
 	c.Assert(err, IsNil)
 	defer UnsetEnvironment(c, "DATA_SOURCE_NAME")
