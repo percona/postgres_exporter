@@ -22,7 +22,14 @@ services:
 
 go_import_path: github.com/percona/postgres_exporter
 
+install:
+# install reviewdog and golangci-lin
+- curl -sfL https://raw.githubusercontent.com/reviewdog/reviewdog/master/install.sh| sh -s
+- curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s latest
+
 before_script:
+# static analyze
+- bin/golangci-lint run -c=.golangci.yml --out-format=line-number | bin/reviewdog -f=golangci-lint -level=error -reporter=github-pr-check
 # use the same uid as in container
 - sudo usermod -u 999 postgres
 - sudo chown postgres:postgres testdata/ssl/*
