@@ -1215,11 +1215,7 @@ func newDesc(subsystem, name, help string, labels prometheus.Labels) *prometheus
 }
 
 func queryDatabases(server *Server) ([]string, error) {
-	query := `SELECT datname 
-                FROM pg_database  
-			   WHERE datallowconn = true 
-			     AND datistemplate = false 
-				 AND has_database_privilege(current_user, datname, 'connect')`
+	query := `SELECT datname FROM pg_database  WHERE datallowconn = true AND datistemplate = false AND has_database_privilege(current_user, datname, 'connect')`
 
 	rows, err := server.db.Query(query)
 	if err != nil {
