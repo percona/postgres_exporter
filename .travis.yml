@@ -1,12 +1,13 @@
 dist: bionic
 language: go
+os: linux
 
 go:
   - 1.15.x
   - 1.14.x
   - tip
 
-matrix:
+jobs:
   allow_failures:
     - go: tip
 
@@ -19,7 +20,7 @@ env:
   global:
     # REVIEWDOG_GITHUB_API_TOKEN
     secure: w+61ClEP7mmr53RaNDFFFcA1qw39CRIUCG9PBYOcuw7TqvFnn8e16IyWWKEjE0/Jd8lzL1xJYi3uNj4tqqWFp36bbgpjTh5QbUGAOEpRr2pPFCpl6Xhg8WGwlElU2tJIKlUqwWfZOJeD3AtALF6/IeAh9e7+Gp1xa22lQ7RAt5aaC3Z1qV2eo2e1kXa8WrBO5N+uTriu9tpBdPDqQFgFdExcl0tVsSbfidxTAe9tykdReKdrgz89rrJ310kpPe3vPSNk5nxPJj3y3S6eXer8wMM5whY5hCcyExlP7sezptASN083kdBpq/K53YGFQiqF0Nac3OogGs6vM0s9BB5hl/I1WXxKCy0fxB6x7+Z2oRLLUGbtriym5LgPyQo5FRdjrS3tonhnrMOb4Vsa7ai8UbFNETxCPzlRZj8x0aA1H6f6GbIrZ/EfBTJyxwE+xAbvFKwOEomC6dkGwCBClT+D7wqaYICfV21csYlTGCw5gPNrbZIZv5mntU/DRTH2mumYRpgzEm79/bRjXhL2mWzjL+LrBNgVJs4/8YsSSkE1Yu4jmQBSDUMbZHX1r63ZSAbjABhugtv1v6GZV0914Cv0g/infBlN8b7n0HDS7TcwqoWK5APP2rI77Z8hS1YLtsQjRoPOOFqhsRElqqsAwKhYFXHanYeKygrwO6YYXPANQ+8=
-  matrix:
+  jobs:
     - POSTGRESQL_IMAGE=postgres:9.4
     - POSTGRESQL_IMAGE=postgres:9.5
     - POSTGRESQL_IMAGE=postgres:9.6
@@ -56,9 +57,6 @@ script:
 
 after_failure:
   - docker-compose logs
-#- docker exec postgres_exporter_postgresql cat /etc/passwd
-#- ls -l testdata/ssl
-#- sudo cat /etc/passwd
 
 notifications:
   email: false
