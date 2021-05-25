@@ -27,7 +27,7 @@ all: vet style staticcheck build test
 
 style:
 	@echo ">> checking code style"
-	! $(GOFMT) -d $$(find . -path ./vendor -prune -o -name '*.go' -print) | grep '^'
+	! $(GOFMT) -d $$(find . -name '*.go' -print) | grep '^'
 
 check_license:
 	@echo ">> checking license header"
@@ -57,7 +57,8 @@ vet:
 
 staticcheck: $(STATICCHECK)
 	@echo ">> running staticcheck"
-	$(STATICCHECK) $(pkgs)
+	GOOS= GOARCH= $(GO) build -modfile=tools/go.mod -o bin/staticcheck honnef.co/go/tools/cmd/staticcheck
+	bin/staticcheck $(pkgs)
 
 build: promu
 	@echo ">> building binaries"
@@ -73,8 +74,5 @@ docker:
 
 promu:
 	GOOS= GOARCH= $(GO) build -modfile=tools/go.mod -o bin/promu github.com/prometheus/promu
-
-$(FIRST_GOPATH)/bin/staticcheck:
-	GOOS= GOARCH= $(GO) build -modfile=tools/go.mod -o bin/staticcheck -u honnef.co/go/tools/cmd/staticcheck
 
 .PHONY: all style check_license format build test vet assets tarball docker promu staticcheck bin/staticcheck
