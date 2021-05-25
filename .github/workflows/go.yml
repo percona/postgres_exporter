@@ -60,7 +60,7 @@ jobs:
     - name: Run Tests
       run: |
         sudo chown root:root testdata/ssl/*
-        sudo chmod 0644 testdata/ssl/*
+        sudo chmod 0640 testdata/ssl/*
         docker-compose up -d
         make
         make test
