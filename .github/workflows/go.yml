@@ -60,7 +60,7 @@ jobs:
     - name: Run Tests
       run: |
         sudo chown postgres:postgres testdata/ssl/*
-        sudo chmod 0600 testdata/ssl/*
+        sudo chmod 0644 testdata/ssl/*
         docker-compose up -d
         make
         make test
@@ -76,4 +76,5 @@ jobs:
         git status
         docker --version
         docker-compose --version
+        ls -ali testdata/ssl/
         docker-compose logs
