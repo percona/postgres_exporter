@@ -17,9 +17,6 @@ jobs:
           - 1.15
           - 1.16
         postgresql-image:
-          - postgres:9.4
-          - postgres:9.5
-          - postgres:9.6
           - postgres:10
           - postgres:11
           - postgres:12
