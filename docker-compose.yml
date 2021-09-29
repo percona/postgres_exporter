@@ -25,4 +25,4 @@ services:
       - POSTGRES_USER=root
       - POSTGRES_PASSWORD=root
     volumes:
-      - ./testdata/ssl:/ssl
+      - ./testdata/ssl/server:/ssl
