@@ -20,7 +20,7 @@ services:
       -c ssl_ca_file=/ssl/CA.crt
       -c log_min_messages=DEBUG4
     ports:
-      - 127.0.0.1:5433:5432
+      - 5433:5432
     environment:
       - POSTGRES_USER=root
       - POSTGRES_PASSWORD=root
