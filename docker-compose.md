@@ -19,6 +19,6 @@ sudo chmod 0600 testdata/ssl/client/*
 Connect using psql
 
 ```
-psql "host=127.0.0.1 port=5433 user=root password=root dbname=postgres sslmode=verify-ca sslcert=/tmp/ssl/server.crt sslkey=/tmp/ssl/server.key sslrootcert=/tmp/ssl/CA.crt"
+psql "host=127.0.0.1 port=5433 user=root password=root dbname=postgres sslmode=verify-ca sslcert=${PWD}/testdata/ssl/client/server.crt sslkey=${PWD}/testdata/ssl/client/server.key sslrootcert=${PWD}/testdata/ssl/client/CA.crt"
 ```
 
