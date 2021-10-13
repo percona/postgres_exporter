@@ -5,13 +5,17 @@ services:
     image: ${POSTGRESQL_IMAGE:-postgres}
     container_name: postgres_exporter_postgresql
     ports:
-      - 127.0.0.1:5432:5432
+      - "127.0.0.1:5432:5432"
     environment:
       - POSTGRES_USER=root
       - POSTGRES_PASSWORD=root
 
   postgresql-ssl:
-    image: ${POSTGRESQL_IMAGE:-postgres}
+    build:
+      context: .
+      dockerfile: testdata/Dockerfile
+      args:
+        POSTGRESQL_IMAGE: ${POSTGRESQL_IMAGE:-postgres}
     container_name: postgres_exporter_postgresql-ssl
     command: >
       -c ssl=on
@@ -19,9 +23,9 @@ services:
       -c ssl_key_file=/ssl/server.key
       -c log_min_messages=DEBUG4
     ports:
-      - 127.0.0.1:5433:5432
+      - "127.0.0.1:5433:5432"
     environment:
       - POSTGRES_USER=root
       - POSTGRES_PASSWORD=root
-    volumes:
-      - ./testdata/ssl:/ssl
+#    volumes:
+#      - ./pg_data:/var/lib/postgresql/data/
