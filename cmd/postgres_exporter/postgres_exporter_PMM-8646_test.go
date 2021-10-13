@@ -17,8 +17,8 @@ import (
 )
 
 var (
-	//exporterPort, _         = GetFreePort()
-	exporterPort         = 10000
+	exporterPort, _         = GetFreePort()
+	//exporterPort         = 10000
 	exporterMetricsEndpoint = fmt.Sprintf("http://localhost:%d/metrics", exporterPort)
 	pgPort                  = 55333 // you should not have PG be running on this port
 	dataSources             = []string{
