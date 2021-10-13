@@ -863,11 +863,12 @@ type cachedMetrics struct {
 // Server describes a connection to Postgres.
 // Also it contains metrics map and query overrides.
 type Server struct {
-	db        *sql.DB
-	labels    prometheus.Labels
-	labelsMtx sync.RWMutex
-	master    bool
-	masterMtx sync.RWMutex
+	db           *sql.DB
+	customDBPing DBPing
+	labels       prometheus.Labels
+	labelsMtx    sync.RWMutex
+	master       bool
+	masterMtx    sync.RWMutex
 
 	// Last version used to calculate metric map. If mismatch on scrape,
 	// then maps are recalculated.
@@ -886,6 +887,52 @@ type Server struct {
 
 // ServerOpt configures a server.
 type ServerOpt func(*Server)
+
+// DBPing provides extension point for integration testing.
+type DBPing func(s *Server) error
+
+// GetServerRetryFactory creates new instance of retry logic
+type GetServerRetryFactory interface {
+	Create() GetServerRetry
+}
+
+type DefaultGetServerRetryFactory struct {
+	retries int
+}
+
+// GetServerRetry retry logic, cannot be shared across threads nor reused
+type GetServerRetry interface {
+	CanRetry() (yes bool, lastError error)
+	Fail(e error)
+}
+
+func (d *DefaultGetServerRetryFactory) Create() GetServerRetry {
+	return &DefaultRetryStrategy{
+		errCount: 0,
+		retries:  d.retries,
+	}
+}
+
+func NewDefaultGetServerRetryFactory(retries int) GetServerRetryFactory {
+	return &DefaultGetServerRetryFactory{
+		retries: retries,
+	}
+}
+
+type DefaultRetryStrategy struct {
+	lastError error
+	errCount  int
+	retries   int
+}
+
+func (d *DefaultRetryStrategy) CanRetry() (yes bool, lastError error) {
+	return d.errCount >= d.retries, d.lastError
+}
+
+func (d *DefaultRetryStrategy) Fail(e error) {
+	d.errCount++
+	time.Sleep(time.Duration(d.errCount) * time.Second)
+}
 
 // ServerWithLabels configures a set of labels.
 func ServerWithLabels(labels prometheus.Labels) ServerOpt {
@@ -972,37 +1019,56 @@ func (s *Server) Scrape(ch chan<- prometheus.Metric, disableSettingsMetrics bool
 
 // Servers contains a collection of servers to Postgres.
 type Servers struct {
-	m       sync.Mutex
-	servers map[string]*Server
-	opts    []ServerOpt
+	m               sync.Mutex
+	servers         map[string]*Server
+	opts            []ServerOpt
+	extensionPoints *ExtensionPoints
 }
 
 // NewServers creates a collection of servers to Postgres.
 func NewServers(opts ...ServerOpt) *Servers {
 	return &Servers{
-		servers: make(map[string]*Server),
-		opts:    opts,
+		servers:         make(map[string]*Server),
+		opts:            opts,
+		extensionPoints: &ExtensionPoints{},
+	}
+}
+
+// NewServersWithExtensions creates a collection of servers to Postgres with extension points.
+func NewServersWithExtensions(extensionPoints *ExtensionPoints, opts ...ServerOpt) *Servers {
+	return &Servers{
+		servers:         make(map[string]*Server),
+		opts:            opts,
+		extensionPoints: extensionPoints,
 	}
 }
 
 // GetServer returns established connection from a collection.
 func (s *Servers) GetServer(dsn string) (*Server, error) {
 	var err error
-	var ok bool
-	errCount := 0 // start at zero because we increment before doing work
-	retries := 3
+	var found bool
+
+	var retryLogic = NewDefaultGetServerRetryFactory(3)
+
+	if s.extensionPoints.getServerRetryFactory != nil {
+		retryLogic = s.extensionPoints.getServerRetryFactory
+	}
+
+	retry := retryLogic.Create()
+
 	var server *Server
 	for {
-		if errCount++; errCount > retries {
-			return nil, err
+		if yes, lastError := retry.CanRetry(); !yes {
+			return nil, lastError
 		}
+
 		s.m.Lock()
-		server, ok = s.servers[dsn]
+		server, found = s.servers[dsn]
 		s.m.Unlock()
-		if !ok {
+		if !found {
 			server, err = NewServer(dsn, s.opts...)
 			if err != nil {
-				time.Sleep(time.Duration(errCount) * time.Second)
+				retry.Fail(err)
 				continue
 			}
 			s.m.Lock()
@@ -1010,13 +1076,21 @@ func (s *Servers) GetServer(dsn string) (*Server, error) {
 			s.m.Unlock()
 		}
 
-		if err = server.Ping(); err != nil {
+		var ping DBPing = func(s *Server) error {
+			return server.Ping()
+		}
+		if s.extensionPoints.dbPing != nil {
+			ping = s.extensionPoints.dbPing
+		}
+
+		if err = ping(server); err != nil {
 			s.m.Lock()
 			delete(s.servers, dsn)
 			s.m.Unlock()
-			time.Sleep(time.Duration(errCount) * time.Second)
+			retry.Fail(err)
 			continue
 		}
+
 		break
 	}
 	return server, nil
@@ -1055,10 +1129,32 @@ type Exporter struct {
 	// servers are used to allow re-using the DB connection between scrapes.
 	// servers contains metrics map and query overrides.
 	servers *Servers
+
+	extensionPoints *ExtensionPoints
+}
+
+// ExtensionPoints available extension points / hooks
+type ExtensionPoints struct {
+	dbPing                DBPing
+	getServerRetryFactory GetServerRetryFactory
 }
 
 // ExporterOpt configures Exporter.
 type ExporterOpt func(*Exporter)
+
+// CustomServerPing provides custom DB ping, needed for e2e testing.
+func CustomServerPing(logic DBPing) ExporterOpt {
+	return func(e *Exporter) {
+		e.extensionPoints.dbPing = logic
+	}
+}
+
+// CustomGetServerRetry provides custom retry logic, needed for e2e testing.
+func CustomGetServerRetry(logic GetServerRetryFactory) ExporterOpt {
+	return func(e *Exporter) {
+		e.extensionPoints.getServerRetryFactory = logic
+	}
+}
 
 // DisableDefaultMetrics configures default metrics export.
 func DisableDefaultMetrics(b bool) ExporterOpt {
@@ -1140,6 +1236,7 @@ func NewExporter(dsn []string, opts ...ExporterOpt) *Exporter {
 	e := &Exporter{
 		dsn:               dsn,
 		builtinMetricMaps: builtinMetricMaps,
+		extensionPoints:   &ExtensionPoints{},
 	}
 
 	for _, opt := range opts {
@@ -1153,7 +1250,7 @@ func NewExporter(dsn []string, opts ...ExporterOpt) *Exporter {
 }
 
 func (e *Exporter) setupServers() {
-	e.servers = NewServers(ServerWithLabels(e.constantLabels))
+	e.servers = NewServersWithExtensions(e.extensionPoints, ServerWithLabels(e.constantLabels))
 }
 
 func (e *Exporter) setupInternalMetrics() {
@@ -1605,6 +1702,8 @@ func (e *Exporter) scrape(ch chan<- prometheus.Metric) {
 			log.Errorf(err.Error())
 
 			if _, ok := err.(*ErrorConnectToServer); ok {
+				connectionErrorsCount++
+			} else if strings.Contains(err.Error(), "dial tcp") {
 				connectionErrorsCount++
 			}
 		}

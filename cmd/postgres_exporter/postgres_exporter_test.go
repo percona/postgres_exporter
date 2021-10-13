@@ -182,13 +182,12 @@ func (s *FunctionalSuite) TestSSL(c *C) {
 	}
 
 	type row struct {
-		Pid         int    // pid
-		Ssl         bool   // ssl
-		Version     string // version
-		Cipher      string // cipher
-		Bits        int    // bits
-		Compression bool   // compression
-		Clientdn    string // clientdn
+		Pid      int    // pid
+		Ssl      bool   // ssl
+		Version  string // version
+		Cipher   string // cipher
+		Bits     int    // bits
+		Clientdn string // clientdn
 	}
 	res := row{}
 
@@ -201,8 +200,8 @@ func (s *FunctionalSuite) TestSSL(c *C) {
 	}
 
 	// This query returns information about the current connection. Ssl field should be true
-	sqlstr := "SELECT pid, ssl, version, cipher, bits, compression FROM pg_stat_ssl WHERE pid=pg_backend_pid()"
-	err = db.QueryRow(sqlstr).Scan(&res.Pid, &res.Ssl, &res.Version, &res.Cipher, &res.Bits, &res.Compression)
+	sqlstr := "SELECT pid, ssl, version, cipher, bits FROM pg_stat_ssl WHERE pid=pg_backend_pid()"
+	err = db.QueryRow(sqlstr).Scan(&res.Pid, &res.Ssl, &res.Version, &res.Cipher, &res.Bits)
 	c.Assert(err, IsNil)
 	c.Assert(res.Ssl, Equals, true)
 	c.Assert(db.Close(), IsNil)
