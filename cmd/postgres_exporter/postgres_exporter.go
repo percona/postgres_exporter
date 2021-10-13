@@ -47,6 +47,7 @@ var Version = "0.0.1-rev"
 var VersionShort = "0.0.1"
 
 var (
+	dbCircuitBreaker              = kingpin.Flag("db.circuit-breaker-time-sec", "Used for timeouts and other connectivity issues with DB, amount of seconds for which DB is considered not accessible.").Default("10").Envar("PG_EXPORTER_DB_CIRCUIT_BREAKER_SEC").Int32()
 	listenAddress                 = kingpin.Flag("web.listen-address", "Address to listen on for web interface and telemetry.").Default(":9187").Envar("PG_EXPORTER_WEB_LISTEN_ADDRESS").String()
 	metricPath                    = kingpin.Flag("web.telemetry-path", "Path under which to expose metrics.").Default("/metrics").Envar("PG_EXPORTER_WEB_TELEMETRY_PATH").String()
 	disableDefaultMetrics         = kingpin.Flag("disable-default-metrics", "Do not include default metrics.").Default("false").Envar("PG_EXPORTER_DISABLE_DEFAULT_METRICS").Bool()
@@ -926,11 +927,12 @@ type DefaultRetryStrategy struct {
 }
 
 func (d *DefaultRetryStrategy) CanRetry() (yes bool, lastError error) {
-	return d.errCount >= d.retries, d.lastError
+	return d.errCount < d.retries, d.lastError
 }
 
 func (d *DefaultRetryStrategy) Fail(e error) {
 	d.errCount++
+	d.lastError = e
 	time.Sleep(time.Duration(d.errCount) * time.Second)
 }
 
@@ -1125,12 +1127,46 @@ type Exporter struct {
 	psqlUp             prometheus.Gauge
 	userQueriesError   *prometheus.GaugeVec
 	totalScrapes       prometheus.Counter
+	dbCircuitBreaker   *DBCircuitBreaker
 
 	// servers are used to allow re-using the DB connection between scrapes.
 	// servers contains metrics map and query overrides.
 	servers *Servers
 
 	extensionPoints *ExtensionPoints
+}
+
+type DBCircuitBreaker struct {
+	lock           sync.RWMutex
+	timeout        time.Duration
+	dsnClosedUntil map[string]time.Time
+}
+
+func NewDBCircuitBreaker() *DBCircuitBreaker {
+	return &DBCircuitBreaker{
+		dsnClosedUntil: make(map[string]time.Time),
+	}
+}
+
+func (c *DBCircuitBreaker) isOpenFor(dsn string) bool {
+	c.lock.RLock()
+	defer c.lock.RUnlock()
+
+	if closedUntil, found := c.dsnClosedUntil[dsn]; found {
+		now := time.Now()
+		return now.After(closedUntil)
+	} else {
+		return true
+	}
+}
+
+func (c *DBCircuitBreaker) closeFor(dsn string) time.Time {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
+	until := time.Now().Add(c.timeout)
+	c.dsnClosedUntil[dsn] = until
+	return until
 }
 
 // ExtensionPoints available extension points / hooks
@@ -1160,6 +1196,13 @@ func CustomGetServerRetry(logic GetServerRetryFactory) ExporterOpt {
 func DisableDefaultMetrics(b bool) ExporterOpt {
 	return func(e *Exporter) {
 		e.disableDefaultMetrics = b
+	}
+}
+
+// DisableDefaultMetrics configures default metrics export.
+func DBCircuitBreakerConfig(sec int32) ExporterOpt {
+	return func(e *Exporter) {
+		e.dbCircuitBreaker.timeout = time.Duration(sec) * time.Second
 	}
 }
 
@@ -1237,6 +1280,7 @@ func NewExporter(dsn []string, opts ...ExporterOpt) *Exporter {
 		dsn:               dsn,
 		builtinMetricMaps: builtinMetricMaps,
 		extensionPoints:   &ExtensionPoints{},
+		dbCircuitBreaker:  NewDBCircuitBreaker(),
 	}
 
 	for _, opt := range opts {
@@ -1696,16 +1740,23 @@ func (e *Exporter) scrape(ch chan<- prometheus.Metric) {
 	var connectionErrorsCount int
 
 	for _, dsn := range dsns {
-		if err := e.scrapeDSN(ch, dsn); err != nil {
-			errorsCount++
+		if e.dbCircuitBreaker.isOpenFor(dsn) {
+			if err := e.scrapeDSN(ch, dsn); err != nil {
+				errorsCount++
 
-			log.Errorf(err.Error())
+				log.Errorf(err.Error())
 
-			if _, ok := err.(*ErrorConnectToServer); ok {
-				connectionErrorsCount++
-			} else if strings.Contains(err.Error(), "dial tcp") {
-				connectionErrorsCount++
+				if _, ok := err.(*ErrorConnectToServer); ok {
+					e.dbCircuitBreaker.closeFor(dsn)
+					connectionErrorsCount++
+				} else if strings.Contains(err.Error(), "dial tcp") {
+					e.dbCircuitBreaker.closeFor(dsn)
+					connectionErrorsCount++
+				}
 			}
+		} else {
+			log.Debugf("circuit breaker is closed for [%s]", dsn)
+			connectionErrorsCount++
 		}
 	}
 
@@ -1881,6 +1932,7 @@ func main() {
 	}
 
 	exporter := NewExporter(dsn,
+		DBCircuitBreakerConfig(*dbCircuitBreaker),
 		DisableDefaultMetrics(*disableDefaultMetrics),
 		DisableSettingsMetrics(*disableSettingsMetrics),
 		AutoDiscoverDatabases(*autoDiscoverDatabases),
