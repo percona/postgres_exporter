@@ -864,12 +864,11 @@ type cachedMetrics struct {
 // Server describes a connection to Postgres.
 // Also it contains metrics map and query overrides.
 type Server struct {
-	db           *sql.DB
-	customDBPing DBPing
-	labels       prometheus.Labels
-	labelsMtx    sync.RWMutex
-	master       bool
-	masterMtx    sync.RWMutex
+	db        *sql.DB
+	labels    prometheus.Labels
+	labelsMtx sync.RWMutex
+	master    bool
+	masterMtx sync.RWMutex
 
 	// Last version used to calculate metric map. If mismatch on scrape,
 	// then maps are recalculated.

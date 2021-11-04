@@ -28,5 +28,6 @@ require (
 	github.com/matttproud/golang_protobuf_extensions v1.0.1 // indirect
 	github.com/prometheus/procfs v0.6.0 // indirect
 	github.com/sirupsen/logrus v1.6.0 // indirect
+	go.uber.org/atomic v1.5.0
 	google.golang.org/protobuf v1.26.0 // indirect
 )

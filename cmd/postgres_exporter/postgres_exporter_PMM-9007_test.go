@@ -8,10 +8,9 @@ import (
 )
 
 func TestCircuitBreakerForDB(t *testing.T) {
+	it := NewPGIntegrationTest()
 	delay := atomic.NewInt64(0) // no delay as scraping is called on the startup
-	exporterReady := make(chan interface{})
-	go runExporter(
-		exporterReady,
+	it.RunExporter(
 		DBCircuitBreakerConfig(10),
 		CustomServerPing(func(s *Server) error {
 			time.Sleep(time.Duration(delay.Load()))
@@ -19,10 +18,12 @@ func TestCircuitBreakerForDB(t *testing.T) {
 		}),
 		CustomGetServerRetry(&CustomGetServerRetryFactory{}),
 	)
-	<-exporterReady
+	go func() {
+		it.StopExporter()
+	}()
 
 	fetchMetrics := func() map[string]string {
-		result, err := _fetchMetrics(
+		result, err := it.FetchMetrics(
 			"pg_up",
 		)
 		if err != nil {
