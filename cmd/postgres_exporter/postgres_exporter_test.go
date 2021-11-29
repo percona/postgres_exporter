@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/blang/semver"
@@ -23,6 +24,7 @@ type FunctionalSuite struct{}
 var _ = Suite(&FunctionalSuite{})
 
 func (s *FunctionalSuite) SetUpSuite(c *C) {
+	*connectionRetries = 1
 }
 
 func (s *FunctionalSuite) TestSemanticVersionColumnDiscard(c *C) {
@@ -206,6 +208,25 @@ func (s *FunctionalSuite) TestSSL(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(res.Ssl, Equals, true)
 	c.Assert(db.Close(), IsNil)
+}
+
+func (s *FunctionalSuite) TestPostgresUp(c *C) {
+	metricCh := make(chan prometheus.Metric)
+	exp := NewExporter([]string{"postgresql://userDsn:passwordDsn@localhost:5000/?sslmode=disabled"})
+	go func() {
+		exp.Collect(metricCh)
+		close(metricCh)
+	}()
+
+	var pgUpFound bool
+	for metric := range metricCh {
+		if strings.Contains(metric.Desc().String(), "pg_up") {
+			pgUpFound = true
+		}
+	}
+	if !pgUpFound {
+		c.Errorf("metric pg_up is not found in response")
+	}
 }
 
 func (s *FunctionalSuite) TestPostgresVersionParsing(c *C) {

@@ -1001,7 +1001,7 @@ func (s *Servers) GetServer(dsn string) (*Server, error) {
 	for {
 		// if errCount++; errCount > retries {
 		if errCount++; errCount > *connectionRetries {
-			return nil, err
+			return nil, fmt.Errorf("%q: too much connection retries", err)
 		}
 		s.m.Lock()
 		server, ok = s.servers[dsn]
@@ -1598,27 +1598,20 @@ func (e *Exporter) scrape(ch chan<- prometheus.Metric) {
 	e.totalScrapes.Inc()
 
 	dsns := e.dsn
-	if e.autoDiscoverDatabases {
-		dsns = e.discoverDatabaseDSNs()
-	}
+	servers := e.getServers()
 
 	var errorsCount int
-	var connectionErrorsCount int
 
-	for _, dsn := range dsns {
-		if err := e.scrapeDSN(ch, dsn); err != nil {
+	for _, server := range servers {
+		if err := e.scrapeDSN(ch, server); err != nil {
 			errorsCount++
 
 			log.Errorf(err.Error())
-
-			if _, ok := err.(*ErrorConnectToServer); ok {
-				connectionErrorsCount++
-			}
 		}
 	}
 
 	switch {
-	case connectionErrorsCount >= len(dsns):
+	case len(dsns) == 0:
 		e.psqlUp.Set(0)
 	default:
 		e.psqlUp.Set(1) // Didn't fail, can mark connection as up for this scrape.
@@ -1632,8 +1625,8 @@ func (e *Exporter) scrape(ch chan<- prometheus.Metric) {
 	}
 }
 
-func (e *Exporter) discoverDatabaseDSNs() []string {
-	dsns := make(map[string]struct{})
+func (e *Exporter) getServers() []*Server {
+	dsns := make(map[string]*Server)
 	for _, dsn := range e.dsn {
 		parsedDSN, err := url.Parse(dsn)
 		if err != nil {
@@ -1641,17 +1634,21 @@ func (e *Exporter) discoverDatabaseDSNs() []string {
 			continue
 		}
 
-		dsns[dsn] = struct{}{}
 		server, err := e.servers.GetServer(dsn)
 		if err != nil {
 			log.Errorf("Error opening connection to database (%s): %v", loggableDSN(dsn), err)
 			continue
 		}
+		dsns[dsn] = server
 
 		// If autoDiscoverDatabases is true, set first dsn as master database (Default: false)
 		server.masterMtx.Lock()
 		server.master = true
 		server.masterMtx.Unlock()
+
+		if !e.autoDiscoverDatabases {
+			continue
+		}
 
 		databaseNames, err := queryDatabases(server)
 		if err != nil {
@@ -1663,33 +1660,28 @@ func (e *Exporter) discoverDatabaseDSNs() []string {
 				continue
 			}
 			parsedDSN.Path = databaseName
-			dsns[parsedDSN.String()] = struct{}{}
+
+			databaseDSN := parsedDSN.String()
+			server, err = e.servers.GetServer(databaseDSN)
+			if err != nil {
+				log.Errorf("Error opening connection to database (%s): %v", loggableDSN(databaseDSN), err)
+				continue
+			}
+			dsns[databaseDSN] = server
 		}
 	}
 
-	result := make([]string, len(dsns))
+	result := make([]*Server, len(dsns))
 	index := 0
-	for dsn := range dsns {
-		result[index] = dsn
+	for _, server := range dsns {
+		result[index] = server
 		index++
 	}
 
 	return result
 }
 
-func (e *Exporter) scrapeDSN(ch chan<- prometheus.Metric, dsn string) error {
-	server, err := e.servers.GetServer(dsn)
-	if err != nil {
-		return &ErrorConnectToServer{fmt.Sprintf("Error opening connection to database (%s): %s", loggableDSN(dsn), err.Error())}
-	}
-
-	// Check if autoDiscoverDatabases is false, set dsn as master database (Default: false)
-	if !e.autoDiscoverDatabases {
-		server.masterMtx.Lock()
-		server.master = true
-		server.masterMtx.Unlock()
-	}
-
+func (e *Exporter) scrapeDSN(ch chan<- prometheus.Metric, server *Server) error {
 	// Check if map versions need to be updated
 	if err := e.checkMapVersions(ch, server); err != nil {
 		log.Warnln("Proceeding with outdated query maps, as the Postgres version could not be determined:", err)
