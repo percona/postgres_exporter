@@ -991,25 +991,26 @@ func NewServers(opts ...ServerOpt) *Servers {
 // GetServer returns established connection from a collection.
 func (s *Servers) GetServer(dsn string) (*Server, error) {
 	var err error
-	var ok bool
+
 	errCount := 0 // start at zero because we increment before doing work
 
-	// Remove this retries and use the global connectionRetries parameter
-	// retries := 3
-
 	var server *Server
+
 	for {
-		// if errCount++; errCount > retries {
 		if errCount++; errCount > *connectionRetries {
 			return nil, fmt.Errorf("%q: too much connection retries", err)
 		}
 		s.m.Lock()
+
+		var ok bool
+
 		server, ok = s.servers[dsn]
 		s.m.Unlock()
 		if !ok {
 			server, err = NewServer(dsn, s.opts...)
 			if err != nil {
 				time.Sleep(time.Duration(errCount) * time.Second)
+
 				continue
 			}
 			s.m.Lock()
@@ -1022,10 +1023,13 @@ func (s *Servers) GetServer(dsn string) (*Server, error) {
 			delete(s.servers, dsn)
 			s.m.Unlock()
 			time.Sleep(time.Duration(errCount) * time.Second)
+
 			continue
 		}
+
 		break
 	}
+
 	return server, nil
 }
 
