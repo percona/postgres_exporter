@@ -1153,7 +1153,9 @@ func NewExporter(dsn []string, opts ...ExporterOpt) *Exporter {
 		opt(e)
 	}
 
-	e.setupInternalMetrics()
+	if !e.disableDefaultMetrics {
+		e.setupInternalMetrics()
+	}
 	e.setupServers()
 
 	return e
@@ -1231,10 +1233,12 @@ func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
 func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 	e.scrape(ch)
 
-	ch <- e.duration
-	ch <- e.totalScrapes
-	ch <- e.error
-	ch <- e.psqlUp
+	if !e.disableDefaultMetrics {
+		ch <- e.duration
+		ch <- e.totalScrapes
+		ch <- e.error
+		ch <- e.psqlUp
+	}
 	e.userQueriesError.Collect(ch)
 }
 
@@ -1775,12 +1779,6 @@ func main() {
 		log.Fatal("couldn't find environment variables describing the datasource to use")
 	}
 
-	queriesEnabled := map[MetricResolution]bool{
-		HR: *collectCustomQueryHr,
-		MR: *collectCustomQueryMr,
-		LR: *collectCustomQueryLr,
-	}
-
 	queriesPath := map[MetricResolution]string{
 		HR: *collectCustomQueryHrDirectory,
 		MR: *collectCustomQueryMrDirectory,
@@ -1791,8 +1789,6 @@ func main() {
 		DisableDefaultMetrics(*disableDefaultMetrics),
 		DisableSettingsMetrics(*disableSettingsMetrics),
 		AutoDiscoverDatabases(*autoDiscoverDatabases),
-		WithUserQueriesEnabled(queriesEnabled),
-		WithUserQueriesPath(queriesPath),
 		WithConstantLabels(*constantLabelsList),
 		ExcludeDatabases(*excludeDatabases),
 	)
@@ -1800,21 +1796,77 @@ func main() {
 		exporter.servers.Close()
 	}()
 
-	prometheus.MustRegister(exporter)
+	hrExporter := NewExporter(dsn,
+		DisableDefaultMetrics(*disableDefaultMetrics),
+		DisableSettingsMetrics(*disableSettingsMetrics),
+		AutoDiscoverDatabases(*autoDiscoverDatabases),
+		WithUserQueriesEnabled(map[MetricResolution]bool{
+			HR: *collectCustomQueryHr,
+			MR: false,
+			LR: false,
+		}),
+		WithUserQueriesPath(queriesPath),
+		WithConstantLabels(*constantLabelsList),
+		ExcludeDatabases(*excludeDatabases),
+	)
+	defer func() {
+		hrExporter.servers.Close()
+	}()
+
+	mrExporter := NewExporter(dsn,
+		DisableDefaultMetrics(true),
+		DisableSettingsMetrics(true),
+		AutoDiscoverDatabases(*autoDiscoverDatabases),
+		WithUserQueriesEnabled(map[MetricResolution]bool{
+			HR: false,
+			MR: *collectCustomQueryMr,
+			LR: false,
+		}),
+		WithUserQueriesPath(queriesPath),
+		WithConstantLabels(*constantLabelsList),
+		ExcludeDatabases(*excludeDatabases),
+	)
+	defer func() {
+		mrExporter.servers.Close()
+	}()
+
+	lrExporter := NewExporter(dsn,
+		DisableDefaultMetrics(true),
+		DisableSettingsMetrics(true),
+		AutoDiscoverDatabases(*autoDiscoverDatabases),
+		WithUserQueriesEnabled(map[MetricResolution]bool{
+			HR: false,
+			MR: false,
+			LR: *collectCustomQueryLr,
+		}),
+		WithUserQueriesPath(queriesPath),
+		WithConstantLabels(*constantLabelsList),
+		ExcludeDatabases(*excludeDatabases),
+	)
+	defer func() {
+		lrExporter.servers.Close()
+	}()
+
+	//prometheus.MustRegister(hrExporter)
 
 	version.Branch = Branch
 	version.BuildDate = BuildDate
 	version.Revision = Revision
 	version.Version = VersionShort
-	prometheus.MustRegister(version.NewCollector("postgres_exporter"))
+	versionCollector := version.NewCollector("postgres_exporter")
+	prometheus.MustRegister(versionCollector)
 
 	psCollector := prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{})
 	goCollector := prometheus.NewGoCollector()
 
 	exporter_shared.RunServer("PostgreSQL", *listenAddress, *metricPath, newHandler(map[string]prometheus.Collector{
 		"exporter":         exporter,
+		"custom_query.hr":  hrExporter,
+		"custom_query.mr":  mrExporter,
+		"custom_query.lr":  lrExporter,
 		"standard.process": psCollector,
 		"standard.go":      goCollector,
+		"version":          versionCollector,
 	}))
 }
 
