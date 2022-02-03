@@ -1153,9 +1153,7 @@ func NewExporter(dsn []string, opts ...ExporterOpt) *Exporter {
 		opt(e)
 	}
 
-	if !e.disableDefaultMetrics {
-		e.setupInternalMetrics()
-	}
+	e.setupInternalMetrics()
 	e.setupServers()
 
 	return e
@@ -1219,6 +1217,7 @@ func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
 
 	go func() {
 		for m := range metricCh {
+			log.Debugln(m.Desc())
 			ch <- m.Desc()
 		}
 		close(doneCh)
@@ -1540,11 +1539,10 @@ func (e *Exporter) checkMapVersions(ch chan<- prometheus.Metric, server *Server)
 		}
 	}
 
-	// Output the version as a special metric only for master database
-	versionDesc := prometheus.NewDesc(fmt.Sprintf("%s_%s", namespace, staticLabelName),
-		"Version string as reported by postgres", []string{"version", "short_version"}, labels)
-
 	if !e.disableDefaultMetrics && master {
+		// Output the version as a special metric only for master database
+		versionDesc := prometheus.NewDesc(fmt.Sprintf("%s_%s", namespace, staticLabelName),
+			"Version string as reported by postgres", []string{"version", "short_version"}, labels)
 		ch <- prometheus.MustNewConstMetric(versionDesc,
 			prometheus.UntypedValue, 1, versionString, semanticVersion.String())
 	}
@@ -1765,6 +1763,7 @@ func main() {
 	kingpin.Version(fmt.Sprintf("postgres_exporter %s (built with %s)\n", Version, runtime.Version()))
 	log.AddFlags(kingpin.CommandLine)
 	kingpin.Parse()
+	log.Base().SetLevel("debug")
 
 	log.Infoln("Starting postgres_exporter", version.Info())
 	log.Infoln("Build context", version.BuildContext())
@@ -1797,8 +1796,8 @@ func main() {
 	}()
 
 	hrExporter := NewExporter(dsn,
-		DisableDefaultMetrics(*disableDefaultMetrics),
-		DisableSettingsMetrics(*disableSettingsMetrics),
+		DisableDefaultMetrics(true),
+		DisableSettingsMetrics(true),
 		AutoDiscoverDatabases(*autoDiscoverDatabases),
 		WithUserQueriesEnabled(map[MetricResolution]bool{
 			HR: *collectCustomQueryHr,
@@ -1847,14 +1846,11 @@ func main() {
 		lrExporter.servers.Close()
 	}()
 
-	//prometheus.MustRegister(hrExporter)
-
 	version.Branch = Branch
 	version.BuildDate = BuildDate
 	version.Revision = Revision
 	version.Version = VersionShort
 	versionCollector := version.NewCollector("postgres_exporter")
-	prometheus.MustRegister(versionCollector)
 
 	psCollector := prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{})
 	goCollector := prometheus.NewGoCollector()
