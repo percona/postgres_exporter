@@ -1046,7 +1046,8 @@ type Exporter struct {
 	// only, since it just points to the global.
 	builtinMetricMaps map[string]intermediateMetricMap
 
-	disableDefaultMetrics, disableSettingsMetrics, autoDiscoverDatabases bool
+	disableDefaultMetrics, disableSettingsMetrics, disableInternalMetrics bool
+	autoDiscoverDatabases                                                 bool
 
 	excludeDatabases   []string
 	dsn                []string
@@ -1071,6 +1072,13 @@ type ExporterOpt func(*Exporter)
 func DisableDefaultMetrics(b bool) ExporterOpt {
 	return func(e *Exporter) {
 		e.disableDefaultMetrics = b
+	}
+}
+
+// DisableInternalMetrics configures internal metrics export.
+func DisableInternalMetrics(b bool) ExporterOpt {
+	return func(e *Exporter) {
+		e.disableInternalMetrics = b
 	}
 }
 
@@ -1102,7 +1110,7 @@ func WithUserQueriesPath(p map[MetricResolution]string) ExporterOpt {
 	}
 }
 
-// WithUserQueriesPath configures user's queries path.
+// WithUserQueriesEnabled enables user's queries.
 func WithUserQueriesEnabled(p map[MetricResolution]bool) ExporterOpt {
 	return func(e *Exporter) {
 		e.userQueriesEnabled = p
@@ -1164,6 +1172,9 @@ func (e *Exporter) setupServers() {
 }
 
 func (e *Exporter) setupInternalMetrics() {
+	if e.disableInternalMetrics {
+		return
+	}
 	e.duration = prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace:   namespace,
 		Subsystem:   exporter,
@@ -1232,7 +1243,7 @@ func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
 func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 	e.scrape(ch)
 
-	if !e.disableDefaultMetrics {
+	if !e.disableInternalMetrics {
 		ch <- e.duration
 		ch <- e.totalScrapes
 		ch <- e.error
@@ -1787,6 +1798,7 @@ func main() {
 	exporter := NewExporter(dsn,
 		DisableDefaultMetrics(*disableDefaultMetrics),
 		DisableSettingsMetrics(*disableSettingsMetrics),
+		DisableInternalMetrics(true),
 		AutoDiscoverDatabases(*autoDiscoverDatabases),
 		WithConstantLabels(*constantLabelsList),
 		ExcludeDatabases(*excludeDatabases),
