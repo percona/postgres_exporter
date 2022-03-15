@@ -1046,11 +1046,12 @@ type Exporter struct {
 	// only, since it just points to the global.
 	builtinMetricMaps map[string]intermediateMetricMap
 
-	disableDefaultMetrics, disableSettingsMetrics, disableInternalMetrics bool
-	autoDiscoverDatabases                                                 bool
+	disableDefaultMetrics, disableSettingsMetrics bool
+	autoDiscoverDatabases                         bool
 
 	excludeDatabases   []string
 	dsn                []string
+	collectorName      string
 	userQueriesPath    map[MetricResolution]string
 	userQueriesEnabled map[MetricResolution]bool
 	constantLabels     prometheus.Labels
@@ -1072,13 +1073,6 @@ type ExporterOpt func(*Exporter)
 func DisableDefaultMetrics(b bool) ExporterOpt {
 	return func(e *Exporter) {
 		e.disableDefaultMetrics = b
-	}
-}
-
-// DisableInternalMetrics configures internal metrics export.
-func DisableInternalMetrics(b bool) ExporterOpt {
-	return func(e *Exporter) {
-		e.disableInternalMetrics = b
 	}
 }
 
@@ -1121,6 +1115,14 @@ func WithUserQueriesEnabled(p map[MetricResolution]bool) ExporterOpt {
 func WithConstantLabels(s string) ExporterOpt {
 	return func(e *Exporter) {
 		e.constantLabels = parseConstLabels(s)
+		e.constantLabels["collector"] = e.collectorName
+	}
+}
+
+// WithCollectorName configures collectorname for labels.
+func WithCollectorName(s string) ExporterOpt {
+	return func(e *Exporter) {
+		e.constantLabels["collector"] = s
 	}
 }
 
@@ -1151,9 +1153,10 @@ func parseConstLabels(s string) prometheus.Labels {
 }
 
 // NewExporter returns a new PostgreSQL exporter for the provided DSN.
-func NewExporter(dsn []string, opts ...ExporterOpt) *Exporter {
+func NewExporter(dsn []string, collectorName string, opts ...ExporterOpt) *Exporter {
 	e := &Exporter{
 		dsn:               dsn,
+		collectorName:     collectorName,
 		builtinMetricMaps: builtinMetricMaps,
 	}
 
@@ -1240,12 +1243,10 @@ func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
 func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 	e.scrape(ch)
 
-	if !e.disableInternalMetrics {
-		ch <- e.duration
-		ch <- e.totalScrapes
-		ch <- e.error
-		ch <- e.psqlUp
-	}
+	ch <- e.duration
+	ch <- e.totalScrapes
+	ch <- e.error
+	ch <- e.psqlUp
 	e.userQueriesError.Collect(ch)
 }
 
@@ -1792,10 +1793,9 @@ func main() {
 		LR: *collectCustomQueryLrDirectory,
 	}
 
-	exporter := NewExporter(dsn,
+	exporter := NewExporter(dsn, "exporter",
 		DisableDefaultMetrics(*disableDefaultMetrics),
 		DisableSettingsMetrics(*disableSettingsMetrics),
-		DisableInternalMetrics(true),
 		AutoDiscoverDatabases(*autoDiscoverDatabases),
 		WithConstantLabels(*constantLabelsList),
 		ExcludeDatabases(*excludeDatabases),
@@ -1804,7 +1804,7 @@ func main() {
 		exporter.servers.Close()
 	}()
 
-	hrExporter := NewExporter(dsn,
+	hrExporter := NewExporter(dsn, "custom_query.hr",
 		DisableDefaultMetrics(true),
 		DisableSettingsMetrics(true),
 		AutoDiscoverDatabases(*autoDiscoverDatabases),
@@ -1821,7 +1821,7 @@ func main() {
 		hrExporter.servers.Close()
 	}()
 
-	mrExporter := NewExporter(dsn,
+	mrExporter := NewExporter(dsn, "custom_query.mr",
 		DisableDefaultMetrics(true),
 		DisableSettingsMetrics(true),
 		AutoDiscoverDatabases(*autoDiscoverDatabases),
@@ -1838,7 +1838,7 @@ func main() {
 		mrExporter.servers.Close()
 	}()
 
-	lrExporter := NewExporter(dsn,
+	lrExporter := NewExporter(dsn, "custom_query.lr",
 		DisableDefaultMetrics(true),
 		DisableSettingsMetrics(true),
 		AutoDiscoverDatabases(*autoDiscoverDatabases),
