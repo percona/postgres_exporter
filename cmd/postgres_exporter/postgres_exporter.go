@@ -1172,9 +1172,6 @@ func (e *Exporter) setupServers() {
 }
 
 func (e *Exporter) setupInternalMetrics() {
-	if e.disableInternalMetrics {
-		return
-	}
 	e.duration = prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace:   namespace,
 		Subsystem:   exporter,
