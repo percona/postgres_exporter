@@ -1772,7 +1772,6 @@ func main() {
 	kingpin.Version(fmt.Sprintf("postgres_exporter %s (built with %s)\n", Version, runtime.Version()))
 	log.AddFlags(kingpin.CommandLine)
 	kingpin.Parse()
-	log.Base().SetLevel("debug")
 
 	log.Infoln("Starting postgres_exporter", version.Info())
 	log.Infoln("Build context", version.BuildContext())
