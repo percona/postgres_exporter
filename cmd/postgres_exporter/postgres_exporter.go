@@ -1006,7 +1006,9 @@ func (s *Servers) GetServer(dsn string) (*Server, error) {
 		if !ok {
 			server, err = NewServer(dsn, s.opts...)
 			if err != nil {
-				time.Sleep(time.Duration(errCount) * time.Second)
+				if errCount != *connectionRetries {
+					time.Sleep(time.Duration(1) * time.Second)
+				}
 
 				continue
 			}
@@ -1019,7 +1021,9 @@ func (s *Servers) GetServer(dsn string) (*Server, error) {
 			s.m.Lock()
 			delete(s.servers, dsn)
 			s.m.Unlock()
-			time.Sleep(time.Duration(errCount) * time.Second)
+			if errCount != *connectionRetries {
+				time.Sleep(time.Duration(1) * time.Second)
+			}
 
 			continue
 		}
