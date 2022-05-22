@@ -1,6 +1,6 @@
 name: Go
 
-on: 
+on:
   push:
     branches:
       - main
@@ -19,32 +19,15 @@ jobs:
           - postgres:10
           - postgres:11
           - postgres:12
-        include:
-          - go-version: tip
-            os: ubuntu-latest
-            postgresql-image: postgres:12
-            may-fail: true
     runs-on: ubuntu-latest
     # The environment this job references
     environment:
       name: CI
     steps:
     - name: Set up Go release
-      if: matrix.go-version != 'tip'
       uses: percona-platform/setup-go@v2
       with:
         go-version: ${{ matrix.go-version }}
-    - name: Set up Go tip
-      if: matrix.go-version == 'tip'
-      env:
-        # to avoid error due to `go version` accepting -v flag with an argument since 1.15
-        GOFLAGS: ""
-      run: |
-        git clone --depth=1 https://go.googlesource.com/go $HOME/gotip
-        cd $HOME/gotip/src
-        ./make.bash
-        echo "GOROOT=$HOME/gotip" >> $GITHUB_ENV
-        echo "$HOME/gotip/bin" >> $GITHUB_PATH
     - name: Checkout code
       uses: percona-platform/checkout@v2
     - name: Run checks
