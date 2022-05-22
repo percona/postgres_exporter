@@ -19,6 +19,8 @@ jobs:
           - postgres:10
           - postgres:11
           - postgres:12
+          - postgres:13
+          - postgres:14
     runs-on: ubuntu-latest
     # The environment this job references
     environment:
