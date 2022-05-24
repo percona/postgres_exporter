@@ -37,8 +37,6 @@ func TestReferenceCompatibility(t *testing.T) {
 	currentMetricsBytes, err := ioutil.ReadAll(resp.Body)
 	assert.Nil(t, err)
 
-	//scanner := bufio.NewScanner(strings.NewReader("pg_settings_pg_stat_statements_save{collector=\"exporter\",server=\"127.0.0.1:5432\"} 0\n"))
-
 	currentMetrics := toMap(t, string(currentMetricsBytes))
 	referenceMetrics := toMap(t, referenceMetrics)
 
