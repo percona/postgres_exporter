@@ -137,7 +137,6 @@ func cleanKeyOrValue(s string) (res string) {
 	}
 	for _, each := range stringsToRemove {
 		res = strings.ReplaceAll(res, each, "")
-
 	}
 
 	return
