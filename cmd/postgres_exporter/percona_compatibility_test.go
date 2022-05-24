@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 //go:embed percona-reference-metrics.txt
@@ -24,7 +25,13 @@ var referenceMetrics string
 // Used to make sure that metrics are present after updating from upstream.
 // You need you run exporter locally on port 42002.
 func TestReferenceCompatibility(t *testing.T) {
-	resp, err := http.Get("http://localhost:42002/metrics")
+	client := &http.Client{
+		Timeout: time.Second * 10,
+	}
+	req, err := http.NewRequest("GET", "http://localhost:42000/metrics", nil)
+	assert.Nil(t, err)
+	//req.SetBasicAuth("pmm", "/agent_id/1654d07b-da30-40aa-9c93-8e69397fc4c2")
+	resp, err := client.Do(req)
 	assert.Nil(t, err)
 	defer resp.Body.Close()
 	currentMetricsBytes, err := ioutil.ReadAll(resp.Body)
@@ -79,38 +86,59 @@ func toMap(t *testing.T, rawMetrics string) map[string]string {
 			continue
 		}
 		next = cleanKeyOrValue(next)
-		items := strings.Split(next, " ")
-		assert.Equal(t, len(items), 2) // metric and value
-		result[items[0]] = items[1]
+		if next != "" {
+			items := strings.Split(next, " ")
+			if len(items) > 1 {
+				result[items[0]] = items[1]
+			} else {
+				fmt.Println("WARN: ")
+			}
+		}
 	}
 
 	return result
 }
 
-var floatRegExp = regexp.MustCompile(`[+-]?(\d*[.])?\d+(e[+-]?\d*)?`)
-var ipRegExp = regexp.MustCompile(`\d*\.\d*\.\d*\.\d*:\d*`)
-var goExp = regexp.MustCompile(`go1.\d*.\d*`)
-var removeAttr1 = "PostgreSQL 11.15 (Debian 11.15-1.pgdg90+1) on x86_64-pc-linux-gnu, compiled by gcc (Debian 6.3.0-18+deb9u1) 6.3.0 20170516, 64-bit"
-var removeAttr2 = "PostgreSQL 11.16 (Debian 11.16-1.pgdg90+1) on x86_64-pc-linux-gnu, compiled by gcc (Debian 6.3.0-18+deb9u1) 6.3.0 20170516, 64-bit"
-var removeAttr3 = "collector=\"exporter\","
-var removeAttr4 = "fastpath function call"
-var removeAttr5 = "idle in transaction (aborted)"
-var removeAttr6 = "idle in transaction"
-var removeAttr7 = "+Inf"
-var removeAttr8 = "0.0.1"
-
 func cleanKeyOrValue(s string) (res string) {
 	res = s
-	res = ipRegExp.ReplaceAllString(res, "-")
-	res = goExp.ReplaceAllString(res, "-")
-	res = strings.ReplaceAll(res, removeAttr1, "")
-	res = strings.ReplaceAll(res, removeAttr2, "")
-	res = strings.ReplaceAll(res, removeAttr3, "")
-	res = strings.ReplaceAll(res, removeAttr4, "")
-	res = strings.ReplaceAll(res, removeAttr5, "")
-	res = strings.ReplaceAll(res, removeAttr6, "")
-	res = strings.ReplaceAll(res, removeAttr7, "")
-	res = strings.ReplaceAll(res, removeAttr8, "")
-	res = floatRegExp.ReplaceAllString(res, "-")
+
+	itemsToIgnore := []string{
+		"example-queries",
+	}
+
+	for _, each := range itemsToIgnore {
+		if strings.Contains(s, each) {
+			return ""
+		}
+	}
+
+	regexpsToRemove := []*regexp.Regexp{
+		regexp.MustCompile(`[+-]?(\d*[.])?\d+(e[+-]?\d*)?`),
+		regexp.MustCompile(`\d*\.\d*\.\d*\.\d*:\d*`),
+		regexp.MustCompile(`go1.\d*.\d*`),
+		regexp.MustCompile(`filename=".*",`),
+	}
+	for _, each := range regexpsToRemove {
+		res = each.ReplaceAllString(res, "")
+	}
+
+	stringsToRemove := []string{
+		"PostgreSQL 11.15 (Debian 11.15-1.pgdg90+1) on x86_64-pc-linux-gnu, compiled by gcc (Debian 6.3.0-18+deb9u1) 6.3.0 20170516, 64-bit",
+		"PostgreSQL 11.16 (Debian 11.16-1.pgdg90+1) on x86_64-pc-linux-gnu, compiled by gcc (Debian 6.3.0-18+deb9u1) 6.3.0 20170516, 64-bit",
+		"collector=\"exporter\",",
+		"fastpath function call",
+		"idle in transaction (aborted)",
+		"idle in transaction",
+		"+Inf",
+		"0.0.1",
+		"collector=\"custom_query.mr\",",
+		"datname=\"pmm-managed\"",
+		"datname=\"pmm-agent\"",
+	}
+	for _, each := range stringsToRemove {
+		res = strings.ReplaceAll(res, each, "")
+
+	}
+
 	return
 }
