@@ -30,7 +30,7 @@ func TestReferenceCompatibility(t *testing.T) {
 	}
 	req, err := http.NewRequest("GET", "http://localhost:42000/metrics", nil)
 	assert.Nil(t, err)
-	//req.SetBasicAuth("pmm", "/agent_id/1654d07b-da30-40aa-9c93-8e69397fc4c2")
+	req.SetBasicAuth("pmm", "/agent_id/825dcdbf-af1c-4eb4-9e96-21699aa6ff7b")
 	resp, err := client.Do(req)
 	assert.Nil(t, err)
 	defer resp.Body.Close()
@@ -115,6 +115,7 @@ func cleanKeyOrValue(s string) (res string) {
 		regexp.MustCompile(`\d*\.\d*\.\d*\.\d*:\d*`),
 		regexp.MustCompile(`go1.\d*.\d*`),
 		regexp.MustCompile(`filename=".*",`),
+		regexp.MustCompile(`hashsum=".*"`),
 	}
 	for _, each := range regexpsToRemove {
 		res = each.ReplaceAllString(res, "")
