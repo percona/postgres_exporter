@@ -137,7 +137,7 @@ func main() {
 		w.Write(landingPage)                                       // nolint: errcheck
 	})
 
-	webCfg := ""
+	var webCfg string
 	if *webConfigFile != "" {
 		webCfg = *webConfigFile
 	}
