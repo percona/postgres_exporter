@@ -41,7 +41,7 @@ func TestReferenceCompatibility(t *testing.T) {
 	referenceMetrics := toMap(t, referenceMetrics)
 
 	//remove matches
-	for m, _ := range currentMetrics {
+	for m := range currentMetrics {
 		_, found := referenceMetrics[m]
 		if found {
 			delete(referenceMetrics, m)
