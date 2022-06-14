@@ -159,6 +159,16 @@ func (p PostgresCollector) Describe(ch chan<- *prometheus.Desc) {
 
 // Collect implements the prometheus.Collector interface.
 func (p PostgresCollector) Collect(ch chan<- prometheus.Metric) {
+	p.doCollectSync(ch)
+}
+
+func (p PostgresCollector) doCollectSync(ch chan<- prometheus.Metric) {
+	for _, s := range p.servers {
+		p.subCollectSync(s, ch)
+	}
+}
+
+func (p PostgresCollector) doCollectAsync(ch chan<- prometheus.Metric) {
 	ctx := context.TODO()
 	wg := sync.WaitGroup{}
 	wg.Add(len(p.servers))
@@ -181,6 +191,13 @@ func (p PostgresCollector) subCollect(ctx context.Context, server *server, ch ch
 		}(name, c)
 	}
 	wg.Wait()
+}
+
+func (p PostgresCollector) subCollectSync(server *server, ch chan<- prometheus.Metric) {
+	ctx := context.TODO()
+	for name, c := range p.Collectors {
+		execute(ctx, name, c, server, ch, p.logger)
+	}
 }
 
 func execute(ctx context.Context, name string, c Collector, s *server, ch chan<- prometheus.Metric, logger log.Logger) {

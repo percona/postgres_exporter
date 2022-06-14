@@ -32,13 +32,11 @@ func NewPGDatabaseCollector(logger log.Logger) (Collector, error) {
 	return &PGDatabaseCollector{log: logger}, nil
 }
 
-var pgDatabase = map[string]*prometheus.Desc{
-	"size_bytes": prometheus.NewDesc(
-		"pg_database_size_bytes",
-		"Disk space used by the database",
-		[]string{"datname", "server"}, nil,
-	),
-}
+var size_bytes = prometheus.NewDesc(
+	"pg_database_size_bytes",
+	"Disk space used by the database",
+	[]string{"datname", "server"}, nil,
+)
 
 func (PGDatabaseCollector) Update(ctx context.Context, server *server, ch chan<- prometheus.Metric) error {
 	db, err := server.GetDB()
@@ -62,7 +60,7 @@ func (PGDatabaseCollector) Update(ctx context.Context, server *server, ch chan<-
 		}
 
 		ch <- prometheus.MustNewConstMetric(
-			pgDatabase["size_bytes"],
+			size_bytes,
 			prometheus.GaugeValue, float64(size), datname, server.GetName(),
 		)
 	}
