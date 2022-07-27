@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/montanaflynn/stats"
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/tklauser/go-sysconf"
 	"golang.org/x/sys/unix"
@@ -134,7 +135,7 @@ func doTestStats(t *testing.T, cnt int, size int, fileName string) *StatsData {
 	var durations []float64
 
 	for i := 0; i < cnt; i++ {
-		d, err := doTest(t, size, fileName)
+		d, err := doTest(size, fileName)
 		if !assert.NoError(t, err) {
 			return nil
 		}
@@ -175,10 +176,10 @@ func checkPort(port int) bool {
 	return true
 }
 
-func doTest(t *testing.T, iterations int, fileName string) (int64, error) {
+func doTest(iterations int, fileName string) (int64, error) {
 	lines, err := os.ReadFile("test.exporter-flags.txt")
-	if !assert.NoError(t, err, "unable to read exporter args file") {
-		return 0, err
+	if err != nil {
+		return 0, errors.Wrapf(err, "Unable to read exporter args file")
 	}
 
 	var port = -1
@@ -190,7 +191,7 @@ func doTest(t *testing.T, iterations int, fileName string) (int64, error) {
 	}
 
 	if port == -1 {
-		panic(fmt.Sprintf("Failed to find free port in range [%d..%d]", portRangeStart, portRangeEnd))
+		return 0, errors.Wrapf(err, "Failed to find free port in range [%d..%d]", portRangeStart, portRangeEnd)
 	}
 
 	linesStr := string(lines)
@@ -205,28 +206,46 @@ func doTest(t *testing.T, iterations int, fileName string) (int64, error) {
 
 	cmd := exec.Command(fileName, linesArr...)
 	cmd.Env = os.Environ()
-	cmd.Env = append(cmd.Env, "DATA_SOURCE_NAME=postgresql://postgres:postgres@127.0.0.1:5432/postgres_exporter?sslmode=disable")
+	cmd.Env = append(cmd.Env, "DATA_SOURCE_NAME=postgresql://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable")
 
 	var outBuffer, errorBuffer bytes.Buffer
 	cmd.Stdout = &outBuffer
 	cmd.Stderr = &errorBuffer
 
+	collectOutput := func() string {
+		result := ""
+		outStr := outBuffer.String()
+		if outStr == "" {
+			result = "Process stdOut was empty. "
+		} else {
+			result = fmt.Sprintf("Process stdOut:\n%s\n", outStr)
+		}
+		errStr := errorBuffer.String()
+		if errStr == "" {
+			result += "Process stdErr was empty."
+		} else {
+			result += fmt.Sprintf("Process stdErr:\n%s\n", errStr)
+		}
+
+		return result
+	}
+
 	err = cmd.Start()
-	if !assert.NoError(t, err, "Failed to start exporter. Process output:\n%q", outBuffer.String()) {
-		return 0, err
+	if err != nil {
+		return 0, errors.Wrapf(err, "Failed to start exporter.%s", collectOutput())
 	}
 
 	err = waitForExporter(port)
-	if !assert.NoError(t, err, "Failed to wait for exporter. Process output:\n%q\nProcess error:\n%q", outBuffer.String(), errorBuffer.String()) {
-		return 0, err
+	if err != nil {
+		return 0, errors.Wrapf(err, "Failed to wait for exporter.%s", collectOutput())
 	}
 
 	total1 := getCPUTime(cmd.Process.Pid)
 
 	for i := 0; i < iterations; i++ {
 		err = tryGetMetrics(port)
-		if !assert.NoError(t, err) {
-			return 0, err
+		if err != nil {
+			return 0, errors.Wrapf(err, "Failed to perform test iteration %d.%s", i, collectOutput())
 		}
 
 		time.Sleep(1 * time.Millisecond)
@@ -235,12 +254,13 @@ func doTest(t *testing.T, iterations int, fileName string) (int64, error) {
 	total2 := getCPUTime(cmd.Process.Pid)
 
 	err = cmd.Process.Signal(unix.SIGINT)
-	assert.NoError(t, err, "Failed to send SIGINT to exporter process")
+	if err != nil {
+		return 0, errors.Wrapf(err, "Failed to send SIGINT to exporter process.%s\n", collectOutput())
+	}
 
 	err = cmd.Wait()
 	if err != nil && err.Error() != "signal: interrupt" {
-		assert.NoError(t, err, "Failed to wait for exporter process termination. Process output:\n%q", outBuffer.String())
-		return 0, err
+		return 0, errors.Wrapf(err, "Failed to wait for exporter process termination.%s\n", collectOutput())
 	}
 
 	return total2 - total1, nil
