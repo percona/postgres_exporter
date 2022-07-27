@@ -30,8 +30,8 @@ const (
 	portRangeStart = 20000 // exporter web interface listening port
 	portRangeEnd   = 20100 // exporter web interface listening port
 
-	count = 3
-	size  = 10
+	count = 5
+	size  = 25
 )
 
 type StatsData struct {
@@ -44,13 +44,11 @@ func TestCpuTime(t *testing.T) {
 	// put postgres_exporter and postgres_exporter_percona files near the test
 
 	t.Run("upstream exporter", func(t *testing.T) {
-		latestStats := doTestStats(t, count, size, "../percona/postgres_exporter")
-		assert.NotNil(t, latestStats)
+		doTestStats(t, count, size, "../percona/postgres_exporter")
 	})
 
 	t.Run("percona exporter", func(t *testing.T) {
-		latestStats := doTestStats(t, count, size, "../percona/postgres_exporter_percona")
-		assert.NotNil(t, latestStats)
+		doTestStats(t, count, size, "../percona/postgres_exporter_percona")
 	})
 }
 
@@ -136,7 +134,11 @@ func doTestStats(t *testing.T, cnt int, size int, fileName string) *StatsData {
 	var durations []float64
 
 	for i := 0; i < cnt; i++ {
-		d, _ := doTest(t, size, fileName)
+		d, err := doTest(t, size, fileName)
+		if !assert.NoError(t, err) {
+			return nil
+		}
+
 		durations = append(durations, float64(d))
 	}
 
@@ -205,16 +207,17 @@ func doTest(t *testing.T, iterations int, fileName string) (int64, error) {
 	cmd.Env = os.Environ()
 	cmd.Env = append(cmd.Env, "DATA_SOURCE_NAME=postgresql://postgres:postgres@127.0.0.1:5432/postgres_exporter?sslmode=disable")
 
-	var out bytes.Buffer
-	cmd.Stdout = &out
+	var outBuffer, errorBuffer bytes.Buffer
+	cmd.Stdout = &outBuffer
+	cmd.Stderr = &errorBuffer
 
 	err = cmd.Start()
-	if !assert.NoError(t, err, "Failed to start exporter. Process output:\n%q", out.String()) {
+	if !assert.NoError(t, err, "Failed to start exporter. Process output:\n%q", outBuffer.String()) {
 		return 0, err
 	}
 
 	err = waitForExporter(port)
-	if !assert.NoError(t, err, "Failed to wait for exporter. Process output:\n%q", out.String()) {
+	if !assert.NoError(t, err, "Failed to wait for exporter. Process output:\n%q\nProcess error:\n%q", outBuffer.String(), errorBuffer.String()) {
 		return 0, err
 	}
 
@@ -236,7 +239,7 @@ func doTest(t *testing.T, iterations int, fileName string) (int64, error) {
 
 	err = cmd.Wait()
 	if err != nil && err.Error() != "signal: interrupt" {
-		assert.NoError(t, err, "Failed to wait for exporter process termination. Process output:\n%q", out.String())
+		assert.NoError(t, err, "Failed to wait for exporter process termination. Process output:\n%q", outBuffer.String())
 		return 0, err
 	}
 
