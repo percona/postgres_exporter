@@ -59,7 +59,7 @@ type StatsData struct {
 func TestCpuTime(t *testing.T) {
 	// put postgres_exporter and postgres_exporter_percona files in 'percona' folder
 	// or use TestPrepareExporters to download exporters from feature build
-	t.Skip("For manual runs only")
+	//t.Skip("For manual runs only")
 
 	t.Run("upstream exporter", func(t *testing.T) {
 		doTestStats(t, repeatCount, scrapesCount, "../percona/postgres_exporter")
@@ -190,7 +190,7 @@ func doTestStats(t *testing.T, cnt int, size int, fileName string) *StatsData {
 	}
 
 	//fmt.Printf("loop %dx%d: sample time: %.2fms [deviation ±%.2fms, %.1f%%]\n", cnt, scrapesCount, st.meanMs, st.stdDevMs, st.stdDevPerc)
-	fmt.Printf("loop %dx%d:\n", cnt, size)
+	fmt.Printf("running %d scrapes %d times\n", size, cnt)
 	fmt.Printf("CPU time: %.2fms [deviation ±%.2fms, %.1f%%]\n", st.meanMs, st.stdDevMs, st.stdDevPerc)
 	fmt.Printf("VmHWM: %.2f kB [deviation ±%.2f kB, %.1f%%]\n", st.meanHwm, st.stdDevHwmBytes, st.stdDevHwmPerc)
 	fmt.Printf("VmData: %.2f kB [deviation ±%.2f kB, %.1f%%]\n", st.meanData, st.stdDevDataBytes, st.stdDevDataPerc)
