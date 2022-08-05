@@ -31,13 +31,13 @@ const (
 	postgresUser     = "postgres"
 	postgresPassword = "postgres"
 
-	exporterWaitTimeoutMs = 1000 // time to wait for exporter process start
+	exporterWaitTimeoutMs = 3000 // time to wait for exporter process start
 
 	portRangeStart = 20000 // exporter web interface listening port
 	portRangeEnd   = 20100 // exporter web interface listening port
 
 	repeatCount  = 5
-	scrapesCount = 100
+	scrapesCount = 10
 
 	perconaExporterUrl  = "https://s3.us-east-2.amazonaws.com/pmm-build-cache/PR-BUILDS/pmm2-client/pmm2-client-PR-2523-9713b64.tar.gz"
 	upstreamExporterUrl = "https://s3.us-east-2.amazonaws.com/pmm-build-cache/PR-BUILDS/pmm2-client/pmm2-client-PR-2531-5e45f95.tar.gz"
@@ -79,7 +79,6 @@ func TestPrepareExporters(t *testing.T) {
 	prepareExporter(upstreamExporterUrl, "postgres_exporter")
 }
 
-//lint:ignore unused
 func prepareExporter(url, fileName string) {
 	resp, err := http.Get(url)
 	if err != nil {
@@ -96,7 +95,6 @@ func prepareExporter(url, fileName string) {
 	}
 }
 
-//lint:ignore unused
 func extractExporter(gzipStream io.Reader, fileName string) {
 	uncompressedStream, err := gzip.NewReader(gzipStream)
 	if err != nil {
@@ -142,7 +140,6 @@ func extractExporter(gzipStream io.Reader, fileName string) {
 	}
 }
 
-//lint:ignore unused
 func doTestStats(t *testing.T, cnt int, size int, fileName string) *StatsData {
 	var durations []float64
 	var hwms []float64
@@ -195,9 +192,9 @@ func doTestStats(t *testing.T, cnt int, size int, fileName string) *StatsData {
 
 	//fmt.Printf("loop %dx%d: sample time: %.2fms [deviation ±%.2fms, %.1f%%]\n", cnt, scrapesCount, st.meanMs, st.stdDevMs, st.stdDevPerc)
 	fmt.Printf("running %d scrapes %d times\n", size, cnt)
-	fmt.Printf("CPU time: %.2fms [deviation ±%.2fms, %.1f%%]\n", st.meanMs, st.stdDevMs, st.stdDevPerc)
-	fmt.Printf("VmHWM: %.2f kB [deviation ±%.2f kB, %.1f%%]\n", st.meanHwm, st.stdDevHwmBytes, st.stdDevHwmPerc)
-	fmt.Printf("VmData: %.2f kB [deviation ±%.2f kB, %.1f%%]\n", st.meanData, st.stdDevDataBytes, st.stdDevDataPerc)
+	fmt.Printf("CPU time: %.2fms [±%.2fms, %.1f%%]\n", st.meanMs, st.stdDevMs, st.stdDevPerc)
+	fmt.Printf("VmHWM: %.2f kB [±%.2f kB, %.1f%%]\n", st.meanHwm, st.stdDevHwmBytes, st.stdDevHwmPerc)
+	fmt.Printf("VmData: %.2f kB [±%.2f kB, %.1f%%]\n", st.meanData, st.stdDevDataBytes, st.stdDevDataPerc)
 
 	return &st
 }
@@ -417,6 +414,9 @@ func waitForExporter(port int) error {
 
 	for ; tryGetMetrics(port) != nil && watchdog > 0; watchdog-- {
 		time.Sleep(1 * time.Millisecond)
+		if watchdog < 1000 {
+			time.Sleep(1 * time.Millisecond)
+		}
 	}
 
 	if watchdog == 0 {
