@@ -31,65 +31,66 @@ const (
 	portRangeStart = 20000 // exporter web interface listening port
 	portRangeEnd   = 20100 // exporter web interface listening port
 
-	count = 5
-	size  = 25
+	repeatCount  = 5
+	scrapesCount = 100
+
+	perconaExporterUrl  = "https://s3.us-east-2.amazonaws.com/pmm-build-cache/PR-BUILDS/pmm2-client/pmm2-client-PR-2523-9713b64.tar.gz"
+	upstreamExporterUrl = "https://s3.us-east-2.amazonaws.com/pmm-build-cache/PR-BUILDS/pmm2-client/pmm2-client-PR-2531-5e45f95.tar.gz"
 )
 
 type StatsData struct {
 	meanMs     float64
 	stdDevMs   float64
 	stdDevPerc float64
+
+	meanHwm        float64
+	stdDevHwmBytes float64
+	stdDevHwmPerc  float64
+
+	meanData        float64
+	stdDevDataBytes float64
+	stdDevDataPerc  float64
 }
 
 func TestCpuTime(t *testing.T) {
-	// put postgres_exporter and postgres_exporter_percona files near the test
+	// put postgres_exporter and postgres_exporter_percona files in 'percona' folder
+	// or use TestPrepareExporters to download exporters from feature build
+	t.Skip("For manual runs only")
 
 	t.Run("upstream exporter", func(t *testing.T) {
-		doTestStats(t, count, size, "../percona/postgres_exporter")
+		doTestStats(t, repeatCount, scrapesCount, "../percona/postgres_exporter")
 	})
 
 	t.Run("percona exporter", func(t *testing.T) {
-		doTestStats(t, count, size, "../percona/postgres_exporter_percona")
+		doTestStats(t, repeatCount, scrapesCount, "../percona/postgres_exporter_percona")
 	})
 }
 
-func preparePerconaExporter(t *testing.T) {
-	const downloadLink = "https://github.com/percona/node_exporter/releases/download/v0.17.1/node_exporter_linux_amd64.tar.gz"
+// TestPrepareExporters extracts exporter from client binary's tar.gz
+func TestPrepareExporters(t *testing.T) {
+	t.Skip("For manual runs only")
 
-	file, err := ioutil.TempFile("/tmp", "node-exporter")
+	prepareExporter(perconaExporterUrl, "postgres_exporter_percona")
+	prepareExporter(upstreamExporterUrl, "postgres_exporter")
+}
+
+func prepareExporter(url, fileName string) {
+	resp, err := http.Get(url)
 	if err != nil {
 		log.Fatal(err)
-	}
-	defer os.Remove(file.Name())
-
-	out, err := os.Create(file.Name())
-	if !assert.NoError(t, err) {
-		return
-	}
-
-	defer out.Close()
-
-	resp, err := http.Get(downloadLink)
-	if !assert.NoError(t, err) {
-		return
 	}
 
 	defer resp.Body.Close()
 
-	n, err := io.Copy(out, resp.Body)
-	if !assert.NoError(t, err) || !assert.NotZero(t, n) {
-		return
-	}
+	extractExporter(resp.Body, fileName)
 
-	cmd := exec.Command("tar", "-xvf", file.Name(), "-C", "/tmp")
-	_, err = cmd.Output()
-
+	err = exec.Command("chmod", "+x", fileName).Run()
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 }
 
-func ExtractTarGz(gzipStream io.Reader) {
+func extractExporter(gzipStream io.Reader, fileName string) {
 	uncompressedStream, err := gzip.NewReader(gzipStream)
 	if err != nil {
 		log.Fatal("ExtractTarGz: NewReader failed")
@@ -97,7 +98,8 @@ func ExtractTarGz(gzipStream io.Reader) {
 
 	tarReader := tar.NewReader(uncompressedStream)
 
-	for true {
+	exporterFound := false
+	for !exporterFound {
 		header, err := tarReader.Next()
 
 		if err == io.EOF {
@@ -110,17 +112,19 @@ func ExtractTarGz(gzipStream io.Reader) {
 
 		switch header.Typeflag {
 		case tar.TypeDir:
-			if err := os.Mkdir(header.Name, 0755); err != nil {
-				log.Fatalf("ExtractTarGz: Mkdir() failed: %s", err.Error())
-			}
+			continue
 		case tar.TypeReg:
-			outFile, err := os.Create(header.Name)
-			if err != nil {
-				log.Fatalf("ExtractTarGz: Create() failed: %s", err.Error())
-			}
-			defer outFile.Close()
-			if _, err := io.Copy(outFile, tarReader); err != nil {
-				log.Fatalf("ExtractTarGz: Copy() failed: %s", err.Error())
+			if strings.HasSuffix(header.Name, "postgres_exporter") {
+				outFile, err := os.Create(fileName)
+				if err != nil {
+					log.Fatalf("ExtractTarGz: Create() failed: %s", err.Error())
+				}
+				defer outFile.Close()
+				if _, err := io.Copy(outFile, tarReader); err != nil {
+					log.Fatalf("ExtractTarGz: Copy() failed: %s", err.Error())
+				}
+
+				exporterFound = true
 			}
 		default:
 			log.Fatalf(
@@ -133,14 +137,18 @@ func ExtractTarGz(gzipStream io.Reader) {
 
 func doTestStats(t *testing.T, cnt int, size int, fileName string) *StatsData {
 	var durations []float64
+	var hwms []float64
+	var datas []float64
 
 	for i := 0; i < cnt; i++ {
-		d, err := doTest(size, fileName)
+		d, hwm, data, err := doTest(size, fileName)
 		if !assert.NoError(t, err) {
 			return nil
 		}
 
 		durations = append(durations, float64(d))
+		hwms = append(hwms, float64(hwm))
+		datas = append(datas, float64(data))
 	}
 
 	mean, _ := stats.Mean(durations)
@@ -155,13 +163,33 @@ func doTestStats(t *testing.T, cnt int, size int, fileName string) *StatsData {
 	mean = mean * float64(1000) / float64(clockTicks) / float64(size)
 	stdDevMs := stdDev / float64(100) * mean
 
+	meanHwm, _ := stats.Mean(hwms)
+	stdDevHwm, _ := stats.StandardDeviation(hwms)
+	stdDevHwmPerc := float64(100) / meanHwm * stdDevHwm
+
+	meanData, _ := stats.Mean(datas)
+	stdDevData, _ := stats.StandardDeviation(datas)
+	stdDevDataPerc := float64(100) / meanData * stdDevData
+
 	st := StatsData{
 		meanMs:     mean,
 		stdDevMs:   stdDevMs,
 		stdDevPerc: stdDev,
+
+		meanHwm:        meanHwm,
+		stdDevHwmBytes: stdDevHwm,
+		stdDevHwmPerc:  stdDevHwmPerc,
+
+		meanData:        meanData,
+		stdDevDataBytes: stdDevData,
+		stdDevDataPerc:  stdDevDataPerc,
 	}
 
-	fmt.Printf("loop %dx%d: sample time: %.2fms [deviation ±%.2fms, %.1f%%]\n", cnt, size, st.meanMs, st.stdDevMs, st.stdDevPerc)
+	//fmt.Printf("loop %dx%d: sample time: %.2fms [deviation ±%.2fms, %.1f%%]\n", cnt, scrapesCount, st.meanMs, st.stdDevMs, st.stdDevPerc)
+	fmt.Printf("loop %dx%d:\n", cnt, size)
+	fmt.Printf("CPU time: %.2fms [deviation ±%.2fms, %.1f%%]\n", st.meanMs, st.stdDevMs, st.stdDevPerc)
+	fmt.Printf("VmHWM: %.2f kB [deviation ±%.2f kB, %.1f%%]\n", st.meanHwm, st.stdDevHwmBytes, st.stdDevHwmPerc)
+	fmt.Printf("VmData: %.2f kB [deviation ±%.2f kB, %.1f%%]\n", st.meanData, st.stdDevDataBytes, st.stdDevDataPerc)
 
 	return &st
 }
@@ -176,10 +204,10 @@ func checkPort(port int) bool {
 	return true
 }
 
-func doTest(iterations int, fileName string) (int64, error) {
+func doTest(iterations int, fileName string) (cpu, hwm, data int64, _ error) {
 	lines, err := os.ReadFile("test.exporter-flags.txt")
 	if err != nil {
-		return 0, errors.Wrapf(err, "Unable to read exporter args file")
+		return 0, 0, 0, errors.Wrapf(err, "Unable to read exporter args file")
 	}
 
 	var port = -1
@@ -191,7 +219,7 @@ func doTest(iterations int, fileName string) (int64, error) {
 	}
 
 	if port == -1 {
-		return 0, errors.Wrapf(err, "Failed to find free port in range [%d..%d]", portRangeStart, portRangeEnd)
+		return 0, 0, 0, errors.Wrapf(err, "Failed to find free port in range [%d..%d]", portRangeStart, portRangeEnd)
 	}
 
 	linesStr := string(lines)
@@ -232,12 +260,12 @@ func doTest(iterations int, fileName string) (int64, error) {
 
 	err = cmd.Start()
 	if err != nil {
-		return 0, errors.Wrapf(err, "Failed to start exporter.%s", collectOutput())
+		return 0, 0, 0, errors.Wrapf(err, "Failed to start exporter.%s", collectOutput())
 	}
 
 	err = waitForExporter(port)
 	if err != nil {
-		return 0, errors.Wrapf(err, "Failed to wait for exporter.%s", collectOutput())
+		return 0, 0, 0, errors.Wrapf(err, "Failed to wait for exporter.%s", collectOutput())
 	}
 
 	total1 := getCPUTime(cmd.Process.Pid)
@@ -245,7 +273,7 @@ func doTest(iterations int, fileName string) (int64, error) {
 	for i := 0; i < iterations; i++ {
 		err = tryGetMetrics(port)
 		if err != nil {
-			return 0, errors.Wrapf(err, "Failed to perform test iteration %d.%s", i, collectOutput())
+			return 0, 0, 0, errors.Wrapf(err, "Failed to perform test iteration %d.%s", i, collectOutput())
 		}
 
 		time.Sleep(1 * time.Millisecond)
@@ -253,17 +281,43 @@ func doTest(iterations int, fileName string) (int64, error) {
 
 	total2 := getCPUTime(cmd.Process.Pid)
 
+	hwm, data = getCPUMem(cmd.Process.Pid)
+
 	err = cmd.Process.Signal(unix.SIGINT)
 	if err != nil {
-		return 0, errors.Wrapf(err, "Failed to send SIGINT to exporter process.%s\n", collectOutput())
+		return 0, 0, 0, errors.Wrapf(err, "Failed to send SIGINT to exporter process.%s\n", collectOutput())
 	}
 
 	err = cmd.Wait()
 	if err != nil && err.Error() != "signal: interrupt" {
-		return 0, errors.Wrapf(err, "Failed to wait for exporter process termination.%s\n", collectOutput())
+		return 0, 0, 0, errors.Wrapf(err, "Failed to wait for exporter process termination.%s\n", collectOutput())
 	}
 
-	return total2 - total1, nil
+	return total2 - total1, hwm, data, nil
+}
+
+func getCPUMem(pid int) (hwm, data int64) {
+	contents, err := ioutil.ReadFile(fmt.Sprintf("/proc/%d/status", pid))
+	if err != nil {
+		return 0, 0
+	}
+
+	lines := strings.Split(string(contents), "\n")
+
+	for _, v := range lines {
+		if strings.HasPrefix(v, "VmHWM") {
+			val := strings.ReplaceAll(strings.ReplaceAll(strings.Split(v, ":\t")[1], " kB", ""), " ", "")
+			hwm, _ = strconv.ParseInt(val, 10, 64)
+			continue
+		}
+		if strings.HasPrefix(v, "VmData") {
+			val := strings.ReplaceAll(strings.ReplaceAll(strings.Split(v, ":\t")[1], " kB", ""), " ", "")
+			data, _ = strconv.ParseInt(val, 10, 64)
+			continue
+		}
+	}
+
+	return hwm, data
 }
 
 func getCPUTime(pid int) (total int64) {
@@ -343,34 +397,6 @@ func tryGetMetrics(port int) error {
 	err = response.Body.Close()
 	if err != nil {
 		return fmt.Errorf("failed to close response: %w", err)
-	}
-
-	return nil
-}
-
-func tryGetMetrics1(port int) error {
-	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/metrics", port))
-	if err != nil {
-		return fmt.Errorf("failed to get response from exporters web interface: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to get response from exporters web interface: %w", err)
-	}
-
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read response from exporters web interface: %w", err)
-	}
-
-	bodyString := string(bodyBytes)
-	if bodyString == "" {
-		return fmt.Errorf("got empty response from exporters web interface: %w", err)
-	}
-
-	err = resp.Body.Close()
-	if err != nil {
-		return fmt.Errorf("failed to close response body: %w", err)
 	}
 
 	return nil
