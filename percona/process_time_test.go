@@ -26,6 +26,10 @@ import (
 )
 
 const (
+	postgresPort     = 5432
+	postgresUser     = "postgres"
+	postgresPassword = "postgres"
+
 	exporterWaitTimeoutMs = 1000 // time to wait for exporter process start
 
 	portRangeStart = 20000 // exporter web interface listening port
@@ -232,9 +236,11 @@ func doTest(iterations int, fileName string) (cpu, hwm, data int64, _ error) {
 
 	linesArr := strings.Split(linesStr, "\n")
 
+	dsn := fmt.Sprintf("DATA_SOURCE_NAME=postgresql://%s:%s@127.0.0.1:%d/postgres?sslmode=disable", postgresUser, postgresPassword, postgresPort)
+
 	cmd := exec.Command(fileName, linesArr...)
 	cmd.Env = os.Environ()
-	cmd.Env = append(cmd.Env, "DATA_SOURCE_NAME=postgresql://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable")
+	cmd.Env = append(cmd.Env, dsn)
 
 	var outBuffer, errorBuffer bytes.Buffer
 	cmd.Stdout = &outBuffer
