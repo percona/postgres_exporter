@@ -59,7 +59,7 @@ type StatsData struct {
 func TestCpuTime(t *testing.T) {
 	// put postgres_exporter and postgres_exporter_percona files in 'percona' folder
 	// or use TestPrepareExporters to download exporters from feature build
-	//t.Skip("For manual runs only")
+	t.Skip("For manual runs only")
 
 	t.Run("upstream exporter", func(t *testing.T) {
 		doTestStats(t, repeatCount, scrapesCount, "../percona/postgres_exporter")
@@ -78,6 +78,7 @@ func TestPrepareExporters(t *testing.T) {
 	prepareExporter(upstreamExporterUrl, "postgres_exporter")
 }
 
+//lint:ignore unused
 func prepareExporter(url, fileName string) {
 	resp, err := http.Get(url)
 	if err != nil {
@@ -94,6 +95,7 @@ func prepareExporter(url, fileName string) {
 	}
 }
 
+//lint:ignore unused
 func extractExporter(gzipStream io.Reader, fileName string) {
 	uncompressedStream, err := gzip.NewReader(gzipStream)
 	if err != nil {
@@ -139,6 +141,7 @@ func extractExporter(gzipStream io.Reader, fileName string) {
 	}
 }
 
+//lint:ignore unused
 func doTestStats(t *testing.T, cnt int, size int, fileName string) *StatsData {
 	var durations []float64
 	var hwms []float64
