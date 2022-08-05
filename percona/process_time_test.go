@@ -26,6 +26,7 @@ import (
 )
 
 const (
+	postgresHost     = "127.0.0.1"
 	postgresPort     = 5432
 	postgresUser     = "postgres"
 	postgresPassword = "postgres"
@@ -239,7 +240,7 @@ func doTest(iterations int, fileName string) (cpu, hwm, data int64, _ error) {
 
 	linesArr := strings.Split(linesStr, "\n")
 
-	dsn := fmt.Sprintf("DATA_SOURCE_NAME=postgresql://%s:%s@127.0.0.1:%d/postgres?sslmode=disable", postgresUser, postgresPassword, postgresPort)
+	dsn := fmt.Sprintf("DATA_SOURCE_NAME=postgresql://%s:%s@%s:%d/postgres?sslmode=disable", postgresUser, postgresPassword, postgresHost, postgresPort)
 
 	cmd := exec.Command(fileName, linesArr...)
 	cmd.Env = os.Environ()
