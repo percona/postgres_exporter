@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"flag"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -43,6 +44,8 @@ const (
 	upstreamExporterUrl = "https://s3.us-east-2.amazonaws.com/pmm-build-cache/PR-BUILDS/pmm2-client/pmm2-client-PR-2531-5e45f95.tar.gz"
 )
 
+var doRun = flag.Bool("doRun", false, "")
+
 type StatsData struct {
 	meanMs     float64
 	stdDevMs   float64
@@ -57,10 +60,14 @@ type StatsData struct {
 	stdDevDataPerc  float64
 }
 
-func TestCpuTime(t *testing.T) {
+func TestPerformance(t *testing.T) {
+	tr := true
+	doRun = &tr
 	// put postgres_exporter and postgres_exporter_percona files in 'percona' folder
 	// or use TestPrepareExporters to download exporters from feature build
-	t.Skip("For manual runs only")
+	if doRun == nil || !*doRun {
+		t.Skip("For manual runs only through make")
+	}
 
 	t.Run("upstream exporter", func(t *testing.T) {
 		doTestStats(t, repeatCount, scrapesCount, "../percona/postgres_exporter")
@@ -420,7 +427,7 @@ func waitForExporter(port int) error {
 	}
 
 	if watchdog == 0 {
-		return fmt.Errorf("Failed to wait for exporter (on port %d)", port)
+		return fmt.Errorf("failed to wait for exporter (on port %d)", port)
 	}
 
 	return nil
