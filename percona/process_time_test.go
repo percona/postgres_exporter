@@ -428,6 +428,9 @@ func tryGetMetrics(port int) error {
 	switch enc {
 	case "gzip":
 		reader, err = gzip.NewReader(response.Body)
+		if err != nil {
+			return fmt.Errorf("failed to create gzip reader: %w", err)
+		}
 		defer reader.Close()
 	default:
 		reader = response.Body
