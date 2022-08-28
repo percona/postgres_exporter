@@ -9,6 +9,7 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"math"
 	"net"
 	"net/http"
 	"os"
@@ -38,13 +39,11 @@ const (
 	portRangeEnd   = 20100 // exporter web interface listening port
 
 	repeatCount  = 5
-	scrapesCount = 10
-
-	perconaExporterUrl  = "https://s3.us-east-2.amazonaws.com/pmm-build-cache/PR-BUILDS/pmm2-client/pmm2-client-PR-2523-9713b64.tar.gz"
-	upstreamExporterUrl = "https://s3.us-east-2.amazonaws.com/pmm-build-cache/PR-BUILDS/pmm2-client/pmm2-client-PR-2531-5e45f95.tar.gz"
+	scrapesCount = 20
 )
 
 var doRun = flag.Bool("doRun", false, "")
+var url = flag.String("url", "", "")
 
 type StatsData struct {
 	meanMs     float64
@@ -67,23 +66,60 @@ func TestPerformance(t *testing.T) {
 	// or use TestPrepareExporters to download exporters from feature build
 	if doRun == nil || !*doRun {
 		t.Skip("For manual runs only through make")
+		return
 	}
 
+	var updated, original *StatsData
 	t.Run("upstream exporter", func(t *testing.T) {
-		doTestStats(t, repeatCount, scrapesCount, "../percona/postgres_exporter")
+		updated = doTestStats(t, repeatCount, scrapesCount, "../percona/postgres_exporter")
 	})
 
 	t.Run("percona exporter", func(t *testing.T) {
-		doTestStats(t, repeatCount, scrapesCount, "../percona/postgres_exporter_percona")
+		original = doTestStats(t, repeatCount, scrapesCount, "../percona/postgres_exporter_percona")
 	})
+
+	diff := original.meanMs - updated.meanMs
+	diffPerc := float64(100) / math.Min(original.meanMs, updated.meanMs) * diff
+	var diffLabel string
+	if diff > 0 {
+		diffLabel = "faster"
+	} else {
+		diffLabel = "slower"
+	}
+
+	fmt.Println()
+	fmt.Printf("Updated exporter is %.0f %% %s (%.2f ms)\n", diffPerc, diffLabel, diff)
+	fmt.Println()
 }
 
 // TestPrepareExporters extracts exporter from client binary's tar.gz
-func TestPrepareExporters(t *testing.T) {
-	t.Skip("For manual runs only")
+func TestPrepareUpdatedExporter(t *testing.T) {
+	if doRun == nil || !*doRun {
+		t.Skip("For manual runs only through make")
+		return
+	}
 
-	prepareExporter(perconaExporterUrl, "postgres_exporter_percona")
-	prepareExporter(upstreamExporterUrl, "postgres_exporter")
+	if url == nil || *url == "" {
+		t.Error("URL not defined")
+		return
+	}
+
+	prepareExporter(*url, "postgres_exporter")
+}
+
+// TestPrepareExporters extracts exporter from client binary's tar.gz
+func TestPreparePerconaExporter(t *testing.T) {
+	if doRun == nil || !*doRun {
+		t.Skip("For manual runs only through make")
+		return
+	}
+
+	if url == nil || *url == "" {
+		t.Error("URL not defined")
+		return
+	}
+
+	prepareExporter(*url, "postgres_exporter_percona")
 }
 
 func prepareExporter(url, fileName string) {
