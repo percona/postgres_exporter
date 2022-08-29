@@ -1,14 +1,12 @@
 package upstream_update
 
 import (
-	"archive/tar"
 	"bytes"
 	"compress/gzip"
 	"flag"
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"net"
 	"net/http"
 	"os"
@@ -38,7 +36,7 @@ const (
 	portRangeEnd   = 20100 // exporter web interface listening port
 
 	repeatCount  = 5
-	scrapesCount = 20
+	scrapesCount = 50
 )
 
 var doRun = flag.Bool("doRun", false, "")
@@ -75,12 +73,7 @@ func TestPerformance(t *testing.T) {
 		original = doTestStats(t, repeatCount, scrapesCount, "../percona/postgres_exporter_percona")
 	})
 
-	fmt.Println()
-	fmt.Println("    \told\tnew\tdiff")
-	fmt.Printf("CPU\t%.1f\t%.1f\t%+.0f%%\n", original.meanMs, updated.meanMs, calculatePerc(original.meanMs, updated.meanMs))
-	fmt.Printf("HWM \t%.1f\t%.1f\t%+.0f%%\n", original.meanHwm, updated.meanHwm, calculatePerc(original.meanHwm, updated.meanHwm))
-	fmt.Printf("DATA\t%.1f\t%.1f\t%+.0f%%\n", original.meanData, updated.meanData, calculatePerc(original.meanData, updated.meanData))
-	fmt.Println()
+	printStats(original, updated)
 }
 
 func calculatePerc(base, updated float64) float64 {
@@ -89,97 +82,6 @@ func calculatePerc(base, updated float64) float64 {
 	diffPerc = diffPerc * -1
 
 	return diffPerc
-}
-
-// TestPrepareExporters extracts exporter from client binary's tar.gz
-func TestPrepareUpdatedExporter(t *testing.T) {
-	if doRun == nil || !*doRun {
-		t.Skip("For manual runs only through make")
-		return
-	}
-
-	if url == nil || *url == "" {
-		t.Error("URL not defined")
-		return
-	}
-
-	prepareExporter(*url, "postgres_exporter")
-}
-
-// TestPrepareExporters extracts exporter from client binary's tar.gz
-func TestPreparePerconaExporter(t *testing.T) {
-	if doRun == nil || !*doRun {
-		t.Skip("For manual runs only through make")
-		return
-	}
-
-	if url == nil || *url == "" {
-		t.Error("URL not defined")
-		return
-	}
-
-	prepareExporter(*url, "postgres_exporter_percona")
-}
-
-func prepareExporter(url, fileName string) {
-	resp, err := http.Get(url)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	defer resp.Body.Close()
-
-	extractExporter(resp.Body, fileName)
-
-	err = exec.Command("chmod", "+x", fileName).Run()
-	if err != nil {
-		log.Fatal(err)
-	}
-}
-
-func extractExporter(gzipStream io.Reader, fileName string) {
-	uncompressedStream, err := gzip.NewReader(gzipStream)
-	if err != nil {
-		log.Fatal("ExtractTarGz: NewReader failed")
-	}
-
-	tarReader := tar.NewReader(uncompressedStream)
-
-	exporterFound := false
-	for !exporterFound {
-		header, err := tarReader.Next()
-
-		if err == io.EOF {
-			break
-		}
-
-		if err != nil {
-			log.Fatalf("ExtractTarGz: Next() failed: %s", err.Error())
-		}
-
-		switch header.Typeflag {
-		case tar.TypeDir:
-			continue
-		case tar.TypeReg:
-			if strings.HasSuffix(header.Name, "postgres_exporter") {
-				outFile, err := os.Create(fileName)
-				if err != nil {
-					log.Fatalf("ExtractTarGz: Create() failed: %s", err.Error())
-				}
-				defer outFile.Close()
-				if _, err := io.Copy(outFile, tarReader); err != nil {
-					log.Fatalf("ExtractTarGz: Copy() failed: %s", err.Error())
-				}
-
-				exporterFound = true
-			}
-		default:
-			log.Fatalf(
-				"ExtractTarGz: uknown type: %d in %s",
-				header.Typeflag,
-				header.Name)
-		}
-	}
 }
 
 func doTestStats(t *testing.T, cnt int, size int, fileName string) *StatsData {
@@ -399,6 +301,15 @@ func getCPUTime(pid int) (total int64) {
 		}
 	}
 	return
+}
+
+func printStats(original, updated *StatsData) {
+	fmt.Println()
+	fmt.Println("        \told\tnew\tdiff")
+	fmt.Printf("CPU, ms \t%.1f\t%.1f\t%+.0f%%\n", original.meanMs, updated.meanMs, calculatePerc(original.meanMs, updated.meanMs))
+	fmt.Printf("HWM, kB \t%.1f\t%.1f\t%+.0f%%\n", original.meanHwm, updated.meanHwm, calculatePerc(original.meanHwm, updated.meanHwm))
+	fmt.Printf("DATA, kB\t%.1f\t%.1f\t%+.0f%%\n", original.meanData, updated.meanData, calculatePerc(original.meanData, updated.meanData))
+	fmt.Println()
 }
 
 func tryGetMetrics(port int) error {

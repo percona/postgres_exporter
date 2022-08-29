@@ -3,7 +3,7 @@ test-performance:
 
 # download exporter from provided feature build's client binary url
 prepare-exporter:
-	go test -v process_time_test.go -run TestPrepareUpdatedExporter -args -doRun=true -url=$(url)
+	go test -v env_prepare_test.go -run TestPrepareUpdatedExporter -args -doRun=true -url=$(url)
 
 prepare-base-exporter:
 	tar -xf postgres_exporter_percona.tar.xz
