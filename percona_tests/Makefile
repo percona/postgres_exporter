@@ -1,5 +1,10 @@
 test-performance:
-	go test -v process_time_test.go -run TestPerformance -args -doRun=true
+	go test -v -run '^TestPerformance$\' -args -doRun=true
+
+test-metrics:
+	go test -v -run '^TestMetrics$\' -args -doRun=true
+
+# env preparation
 
 # download exporter from provided feature build's client binary url
 prepare-exporter:

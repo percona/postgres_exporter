@@ -1,4 +1,4 @@
-package upstream_update
+package percona_tests
 
 import (
 	"archive/tar"

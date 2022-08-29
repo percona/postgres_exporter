@@ -20,5 +20,5 @@
 /.metrics.*.removed
 /tools/src
 /vendor
-/percona/postgres_exporter
-/percona/postgres_exporter_percona
+/percona_tests/postgres_exporter
+/percona_tests/postgres_exporter_percona

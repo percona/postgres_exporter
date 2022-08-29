@@ -1,17 +1,9 @@
-package upstream_update
+package percona_tests
 
 import (
-	"bytes"
-	"compress/gzip"
 	"flag"
 	"fmt"
-	"io"
 	"io/ioutil"
-	"net"
-	"net/http"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -21,20 +13,9 @@ import (
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/tklauser/go-sysconf"
-	"golang.org/x/sys/unix"
 )
 
 const (
-	postgresHost     = "127.0.0.1"
-	postgresPort     = 5432
-	postgresUser     = "postgres"
-	postgresPassword = "postgres"
-
-	exporterWaitTimeoutMs = 3000 // time to wait for exporter process start
-
-	portRangeStart = 20000 // exporter web interface listening port
-	portRangeEnd   = 20100 // exporter web interface listening port
-
 	repeatCount  = 5
 	scrapesCount = 50
 )
@@ -66,11 +47,11 @@ func TestPerformance(t *testing.T) {
 
 	var updated, original *StatsData
 	t.Run("upstream exporter", func(t *testing.T) {
-		updated = doTestStats(t, repeatCount, scrapesCount, "../percona/postgres_exporter")
+		updated = doTestStats(t, repeatCount, scrapesCount, "../percona_tests/postgres_exporter")
 	})
 
 	t.Run("percona exporter", func(t *testing.T) {
-		original = doTestStats(t, repeatCount, scrapesCount, "../percona/postgres_exporter_percona")
+		original = doTestStats(t, repeatCount, scrapesCount, "../percona_tests/postgres_exporter_percona")
 	})
 
 	printStats(original, updated)
@@ -143,80 +124,10 @@ func doTestStats(t *testing.T, cnt int, size int, fileName string) *StatsData {
 	return &st
 }
 
-func checkPort(port int) bool {
-	ln, err := net.Listen("tcp", ":"+fmt.Sprint(port))
-	if err != nil {
-		return false
-	}
-
-	_ = ln.Close()
-	return true
-}
-
 func doTest(iterations int, fileName string) (cpu, hwm, data int64, _ error) {
-	lines, err := os.ReadFile("test.exporter-flags.txt")
+	cmd, port, collectOutput, err := launchExporter(fileName)
 	if err != nil {
-		return 0, 0, 0, errors.Wrapf(err, "Unable to read exporter args file")
-	}
-
-	var port = -1
-	for i := portRangeStart; i < portRangeEnd; i++ {
-		if checkPort(i) {
-			port = i
-			break
-		}
-	}
-
-	if port == -1 {
-		return 0, 0, 0, errors.Wrapf(err, "Failed to find free port in range [%d..%d]", portRangeStart, portRangeEnd)
-	}
-
-	linesStr := string(lines)
-	linesStr += fmt.Sprintf("\n--web.listen-address=127.0.0.1:%d", port)
-
-	absolutePath, _ := filepath.Abs("custom-queries")
-	linesStr += fmt.Sprintf("\n--collect.custom_query.hr.directory=%s/high-resolution", absolutePath)
-	linesStr += fmt.Sprintf("\n--collect.custom_query.mr.directory=%s/medium-resolution", absolutePath)
-	linesStr += fmt.Sprintf("\n--collect.custom_query.lr.directory=%s/low-resolution", absolutePath)
-
-	linesArr := strings.Split(linesStr, "\n")
-
-	dsn := fmt.Sprintf("DATA_SOURCE_NAME=postgresql://%s:%s@%s:%d/postgres?sslmode=disable", postgresUser, postgresPassword, postgresHost, postgresPort)
-
-	cmd := exec.Command(fileName, linesArr...)
-	cmd.Env = os.Environ()
-	cmd.Env = append(cmd.Env, dsn)
-
-	var outBuffer, errorBuffer bytes.Buffer
-	cmd.Stdout = &outBuffer
-	cmd.Stderr = &errorBuffer
-
-	collectOutput := func() string {
-		result := ""
-		outStr := outBuffer.String()
-		if outStr == "" {
-			result = "Process stdOut was empty. "
-		} else {
-			result = fmt.Sprintf("Process stdOut:\n%s\n", outStr)
-		}
-		errStr := errorBuffer.String()
-		if errStr == "" {
-			result += "Process stdErr was empty."
-		} else {
-			result += fmt.Sprintf("Process stdErr:\n%s\n", errStr)
-		}
-
-		return result
-	}
-
-	err = cmd.Start()
-	if err != nil {
-		return 0, 0, 0, errors.Wrapf(err, "Failed to start exporter.%s", collectOutput())
-	}
-
-	err = waitForExporter(port)
-	if err != nil {
-		return 0, 0, 0, errors.Wrapf(err, "Failed to wait for exporter.%s", collectOutput())
+		return 0, 0, 0, err
 	}
 
 	total1 := getCPUTime(cmd.Process.Pid)
@@ -234,14 +145,9 @@ func doTest(iterations int, fileName string) (cpu, hwm, data int64, _ error) {
 
 	hwm, data = getCPUMem(cmd.Process.Pid)
 
-	err = cmd.Process.Signal(unix.SIGINT)
+	err = stopExporter(cmd, collectOutput)
 	if err != nil {
-		return 0, 0, 0, errors.Wrapf(err, "Failed to send SIGINT to exporter process.%s\n", collectOutput())
-	}
-
-	err = cmd.Wait()
-	if err != nil && err.Error() != "signal: interrupt" {
-		return 0, 0, 0, errors.Wrapf(err, "Failed to wait for exporter process termination.%s\n", collectOutput())
+		return 0, 0, 0, err
 	}
 
 	return total2 - total1, hwm, data, nil
@@ -310,74 +216,4 @@ func printStats(original, updated *StatsData) {
 	fmt.Printf("HWM, kB \t%.1f\t%.1f\t%+.0f%%\n", original.meanHwm, updated.meanHwm, calculatePerc(original.meanHwm, updated.meanHwm))
 	fmt.Printf("DATA, kB\t%.1f\t%.1f\t%+.0f%%\n", original.meanData, updated.meanData, calculatePerc(original.meanData, updated.meanData))
 	fmt.Println()
-}
-
-func tryGetMetrics(port int) error {
-	uri := fmt.Sprintf("http://127.0.0.1:%d/metrics", port)
-	client := new(http.Client)
-
-	request, err := http.NewRequest("GET", uri, nil)
-	if err != nil {
-		return err
-	}
-	request.Header.Add("Accept-Encoding", "gzip")
-
-	response, err := client.Do(request)
-
-	if err != nil {
-		return fmt.Errorf("failed to get response from exporters web interface: %w", err)
-	}
-
-	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to get response from exporters web interface: %w", err)
-	}
-
-	// Check that the server actually sent compressed data
-	var reader io.ReadCloser
-	enc := response.Header.Get("Content-Encoding")
-	switch enc {
-	case "gzip":
-		reader, err = gzip.NewReader(response.Body)
-		if err != nil {
-			return fmt.Errorf("failed to create gzip reader: %w", err)
-		}
-		defer reader.Close()
-	default:
-		reader = response.Body
-	}
-
-	buf := new(strings.Builder)
-	_, err = io.Copy(buf, reader)
-	if err != nil {
-		return err
-	}
-
-	rr := buf.String()
-	if rr == "" {
-		return fmt.Errorf("failed to read response")
-	}
-
-	err = response.Body.Close()
-	if err != nil {
-		return fmt.Errorf("failed to close response: %w", err)
-	}
-
-	return nil
-}
-
-func waitForExporter(port int) error {
-	watchdog := exporterWaitTimeoutMs
-
-	for ; tryGetMetrics(port) != nil && watchdog > 0; watchdog-- {
-		time.Sleep(1 * time.Millisecond)
-		if watchdog < 1000 {
-			time.Sleep(1 * time.Millisecond)
-		}
-	}
-
-	if watchdog == 0 {
-		return fmt.Errorf("failed to wait for exporter (on port %d)", port)
-	}
-
-	return nil
 }
