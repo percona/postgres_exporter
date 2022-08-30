@@ -70,7 +70,6 @@ func TestMetrics(t *testing.T) {
 	})
 
 	t.Run("MissingMetricsLabelsTest", func(t *testing.T) {
-		return
 		if ok, msg := testForMissingMetricsLabels(oldMetricsCollection, newMetricsCollection); !ok {
 			t.Error(msg)
 		}
