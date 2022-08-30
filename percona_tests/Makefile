@@ -1,3 +1,6 @@
+#########################
+### tests
+
 # measures avg scrape time and compares old vs new exporters
 test-performance:
 	go test -v -run '^TestPerformance$\' -args -doRun=true
@@ -9,7 +12,8 @@ multipleLabels = false
 test-metrics:
 	go test -v -run '^TestMetrics$\' -args -doRun=true -extraMetrics=$(extraMetrics) -multipleLabels=$(multipleLabels)
 
-# env preparation
+#########################
+### env preparation
 
 # download exporter from provided feature build's client binary url
 prepare-exporter:
@@ -26,3 +30,5 @@ start-postgres-db:
 
 stop-postgres-db:
 	docker-compose -f postgres-compose.yml down
+
+prepare-env-from-repo: prepare-exporter-from-repo prepare-base-exporter start-postgres-db
