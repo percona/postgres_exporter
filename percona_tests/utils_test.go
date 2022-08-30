@@ -32,6 +32,10 @@ const (
 	oldExporterFileName     = "assets/postgres_exporter_percona"
 )
 
+func getBool(val *bool) bool {
+	return val != nil && *val
+}
+
 func launchExporter(fileName string) (cmd *exec.Cmd, port int, collectOutput func() string, _ error) {
 	lines, err := os.ReadFile("assets/test.exporter-flags.txt")
 	if err != nil {

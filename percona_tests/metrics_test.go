@@ -28,9 +28,7 @@ type MetricsCollection struct {
 	LabelsByMetric        map[string][]string
 }
 
-func TestMetrics(t *testing.T) {
-	// put postgres_exporter and postgres_exporter_percona files in 'percona' folder
-	// or use TestPrepareExporters to download exporters from feature build
+func TestMissingMetrics(t *testing.T) {
 	if !getBool(doRun) {
 		t.Skip("For manual runs only through make")
 		return
@@ -51,6 +49,66 @@ func TestMetrics(t *testing.T) {
 	oldMetricsCollection := parseMetricsCollection(oldMetrics)
 	newMetricsCollection := parseMetricsCollection(newMetrics)
 
+	dumpMetricsInfo(oldMetricsCollection, newMetricsCollection)
+
+	if ok, msg := testForMissingMetrics(oldMetricsCollection, newMetricsCollection); !ok {
+		t.Error(msg)
+	}
+}
+
+func TestMissingLabels(t *testing.T) {
+	if !getBool(doRun) {
+		t.Skip("For manual runs only through make")
+		return
+	}
+
+	newMetrics, err := getMetrics(updatedExporterFileName)
+	if err != nil {
+		t.Error(err)
+		return
+	}
+
+	oldMetrics, err := getMetrics(oldExporterFileName)
+	if err != nil {
+		t.Error(err)
+		return
+	}
+
+	oldMetricsCollection := parseMetricsCollection(oldMetrics)
+	newMetricsCollection := parseMetricsCollection(newMetrics)
+
+	dumpMetricsInfo(oldMetricsCollection, newMetricsCollection)
+
+	if ok, msg := testForMissingMetricsLabels(oldMetricsCollection, newMetricsCollection); !ok {
+		t.Error(msg)
+	}
+}
+
+func TestDumpMetrics(t *testing.T) {
+	if !getBool(doRun) {
+		t.Skip("For manual runs only through make")
+		return
+	}
+
+	newMetrics, err := getMetrics(updatedExporterFileName)
+	if err != nil {
+		t.Error(err)
+		return
+	}
+
+	oldMetrics, err := getMetrics(oldExporterFileName)
+	if err != nil {
+		t.Error(err)
+		return
+	}
+
+	oldMetricsCollection := parseMetricsCollection(oldMetrics)
+	newMetricsCollection := parseMetricsCollection(newMetrics)
+
+	dumpMetricsInfo(oldMetricsCollection, newMetricsCollection)
+}
+
+func dumpMetricsInfo(oldMetricsCollection, newMetricsCollection MetricsCollection) {
 	if getBool(dumpMetricsFlag) {
 		dumpMetrics(oldMetricsCollection, newMetricsCollection)
 	}
@@ -62,18 +120,6 @@ func TestMetrics(t *testing.T) {
 	if getBool(printMultipleLabels) {
 		dumpMetricsWithMultipleLabelSets(newMetricsCollection)
 	}
-
-	t.Run("MissingMetricsTest", func(t *testing.T) {
-		if ok, msg := testForMissingMetrics(oldMetricsCollection, newMetricsCollection); !ok {
-			t.Error(msg)
-		}
-	})
-
-	t.Run("MissingMetricsLabelsTest", func(t *testing.T) {
-		if ok, msg := testForMissingMetricsLabels(oldMetricsCollection, newMetricsCollection); !ok {
-			t.Error(msg)
-		}
-	})
 }
 
 func testForMissingMetricsLabels(oldMetricsCollection, newMetricsCollection MetricsCollection) (bool, string) {
@@ -189,10 +235,6 @@ func parseMetricsCollection(metricRaw string) MetricsCollection {
 		RawMetricStrArr:       rawMetricsArr,
 		LabelsByMetric:        labelsByMetrics,
 	}
-}
-
-func getBool(val *bool) bool {
-	return val != nil && *val
 }
 
 func arrIsSubsetOf(a, b []string) bool {

@@ -40,7 +40,7 @@ type StatsData struct {
 func TestPerformance(t *testing.T) {
 	// put postgres_exporter and postgres_exporter_percona files in 'percona' folder
 	// or use TestPrepareExporters to download exporters from feature build
-	if doRun == nil || !*doRun {
+	if !getBool(doRun) {
 		t.Skip("For manual runs only through make")
 		return
 	}

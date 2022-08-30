@@ -11,7 +11,13 @@ dumpMetrics = false
 # verifies metrics list old vs new and fails if some old metrics missing or labels on them missing
 # optionally can dump any extra metrics or metrics collected multiple times with different labels
 test-metrics:
-	go test -v -run '^TestMetrics$\' -args -doRun=true -extraMetrics=$(extraMetrics) -multipleLabels=$(multipleLabels) -dumpMetrics=$(dumpMetrics)
+	go test -v -run '^TestMissingMetrics$\' -args -doRun=true
+
+test-labels:
+	go test -v -run '^TestMissingLabels$\' -args -doRun=true
+
+dump-metrics:
+	go test -v -run '^TestDumpMetrics$\' -args -doRun=true -extraMetrics=$(extraMetrics) -multipleLabels=$(multipleLabels) -dumpMetrics=$(dumpMetrics)
 
 #########################
 ### env preparation
