@@ -1,11 +1,13 @@
+### integration tests for exporter update
+
 basic usage:
 
-1.  download original exporter
+1.  unpack original exporter
 
 
     make prepare-base-exporter
 
-2.a. download updated exporter
+2.a. download updated exporter from specific feature build
 
     make prepare-exporter url="<feature build client binary url>"
 
@@ -22,3 +24,9 @@ basic usage:
 
 
     make test-performance
+
+5.  run metrics list compatibility test
+
+
+    make test-metrics
+

@@ -15,6 +15,9 @@ test-metrics:
 prepare-exporter:
 	go test -v env_prepare_test.go -run TestPrepareUpdatedExporter -args -doRun=true -url=$(url)
 
+prepare-exporter-from-repo:
+	make -C ../ build && cp ../postgres_exporter postgres_exporter
+
 prepare-base-exporter:
 	tar -xf postgres_exporter_percona.tar.xz
 
