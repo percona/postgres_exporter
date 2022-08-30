@@ -145,6 +145,7 @@ func main() {
 		"standard.process": psCollector,
 		"standard.go":      goCollector,
 		"version":          versionCollector,
+		"postgres":         pe,
 	})
 
 	http.Handle(*metricPath, promHandler)
@@ -218,6 +219,7 @@ func (h *handler) innerHandler(filters ...string) (http.Handler, error) {
 
 	// register all collectors by default.
 	if len(filters) == 0 {
+		level.Debug(logger).Log("msg", "NO FILTERS")
 		for name, c := range h.collectors {
 			if err := registry.Register(c); err != nil {
 				return nil, err
@@ -228,6 +230,7 @@ func (h *handler) innerHandler(filters ...string) (http.Handler, error) {
 
 	// register only filtered collectors.
 	for _, name := range filters {
+		level.Debug(logger).Log("msg", "FILTERED")
 		if c, ok := h.collectors[name]; ok {
 			if err := registry.Register(c); err != nil {
 				return nil, err
