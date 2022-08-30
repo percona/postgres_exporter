@@ -21,11 +21,11 @@ type Metric struct {
 }
 
 type MetricsCollection struct {
-	RawMetricStr    string
-	RawMetricStrArr []string
-	MetricNames     []string
-	MetricsData     []Metric
-	LabelsByMetric  map[string][]string
+	RawMetricStr          string
+	RawMetricStrArr       []string
+	MetricNamesWithLabels []string
+	MetricsData           []Metric
+	LabelsByMetric        map[string][]string
 }
 
 func TestMetrics(t *testing.T) {
@@ -36,13 +36,13 @@ func TestMetrics(t *testing.T) {
 		return
 	}
 
-	newMetrics, err := getMetrics("assets/postgres_exporter")
+	newMetrics, err := getMetrics(updatedExporterFileName)
 	if err != nil {
 		t.Error(err)
 		return
 	}
 
-	oldMetrics, err := getMetrics("assets/postgres_exporter_percona")
+	oldMetrics, err := getMetrics(oldExporterFileName)
 	if err != nil {
 		t.Error(err)
 		return
@@ -52,7 +52,7 @@ func TestMetrics(t *testing.T) {
 	newMetricsCollection := parseMetricsCollection(newMetrics)
 
 	if getBool(dumpMetricsFlag) {
-		dumpMetrics(oldMetricsCollection.RawMetricStrArr, newMetricsCollection.RawMetricStrArr)
+		dumpMetrics(oldMetricsCollection, newMetricsCollection)
 	}
 
 	if getBool(printExtraMetrics) {
@@ -183,11 +183,11 @@ func parseMetricsCollection(metricRaw string) MetricsCollection {
 	labelsByMetrics := groupByMetrics(metrics)
 
 	return MetricsCollection{
-		MetricNames:     metricNamesArr,
-		MetricsData:     metrics,
-		RawMetricStr:    metricRaw,
-		RawMetricStrArr: rawMetricsArr,
-		LabelsByMetric:  labelsByMetrics,
+		MetricNamesWithLabels: metricNamesArr,
+		MetricsData:           metrics,
+		RawMetricStr:          metricRaw,
+		RawMetricStrArr:       rawMetricsArr,
+		LabelsByMetric:        labelsByMetrics,
 	}
 }
 
@@ -265,16 +265,29 @@ func parseMetrics(metrics []string) []Metric {
 	return metricsData
 }
 
-func dumpMetrics(oldMetricsArr, newMetricsArr []string) {
+func dumpMetrics(oldMetrics, newMetrics MetricsCollection) {
 	f, _ := os.Create("assets/metrics.old.txt")
-	for _, s := range oldMetricsArr {
+	for _, s := range oldMetrics.RawMetricStrArr {
 		f.WriteString(s)
 		f.WriteString("\n")
 	}
 	f.Close()
 
 	f, _ = os.Create("assets/metrics.new.txt")
-	for _, s := range newMetricsArr {
+	for _, s := range newMetrics.RawMetricStrArr {
+		f.WriteString(s)
+		f.WriteString("\n")
+	}
+	f.Close()
+
+	f, _ = os.Create("assets/metrics.names.old.txt")
+	for _, s := range oldMetrics.MetricNamesWithLabels {
+		f.WriteString(s)
+		f.WriteString("\n")
+	}
+	f.Close()
+	f, _ = os.Create("assets/metrics.names.new.txt")
+	for _, s := range newMetrics.MetricNamesWithLabels {
 		f.WriteString(s)
 		f.WriteString("\n")
 	}

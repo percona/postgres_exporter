@@ -24,7 +24,7 @@ func TestPrepareUpdatedExporter(t *testing.T) {
 		return
 	}
 
-	prepareExporter(*url, "assets/postgres_exporter")
+	prepareExporter(*url, updatedExporterFileName)
 }
 
 func extractExporter(gzipStream io.Reader, fileName string) {

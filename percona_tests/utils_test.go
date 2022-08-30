@@ -27,6 +27,9 @@ const (
 	portRangeEnd   = 20100 // exporter web interface listening port
 
 	exporterWaitTimeoutMs = 3000 // time to wait for exporter process start
+
+	updatedExporterFileName = "assets/postgres_exporter"
+	oldExporterFileName     = "assets/postgres_exporter_percona"
 )
 
 func launchExporter(fileName string) (cmd *exec.Cmd, port int, collectOutput func() string, _ error) {
