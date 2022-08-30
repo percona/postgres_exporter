@@ -55,22 +55,28 @@ func TestMetrics(t *testing.T) {
 		dumpMetrics(oldMetricsCollection.RawMetricStrArr, newMetricsCollection.RawMetricStrArr)
 	}
 
-	extraMetrics := make([]string, 0)
-	for metricName := range newMetricsCollection.LabelsByMetric {
-		if _, ok := oldMetricsCollection.LabelsByMetric[metricName]; !ok {
-			extraMetrics = append(extraMetrics, metricName)
-		}
+	if getBool(printExtraMetrics) {
+		dumpExtraMetrics(newMetricsCollection, oldMetricsCollection)
 	}
-	sort.Strings(extraMetrics)
 
-	missingMetrics := make([]string, 0)
-	for metricName := range oldMetricsCollection.LabelsByMetric {
-		if _, ok := newMetricsCollection.LabelsByMetric[metricName]; !ok {
-			missingMetrics = append(missingMetrics, metricName)
-		}
+	if getBool(printMultipleLabels) {
+		dumpMetricsWithMultipleLabelSets(newMetricsCollection)
 	}
-	sort.Strings(missingMetrics)
 
+	t.Run("MissingMetricsTest", func(t *testing.T) {
+		if ok, msg := testForMissingMetrics(oldMetricsCollection, newMetricsCollection); !ok {
+			t.Error(msg)
+		}
+	})
+
+	t.Run("MissingMetricsLabelsTest", func(t *testing.T) {
+		if ok, msg := testForMissingMetricsLabels(oldMetricsCollection, newMetricsCollection); !ok {
+			t.Error(msg)
+		}
+	})
+}
+
+func testForMissingMetricsLabels(oldMetricsCollection, newMetricsCollection MetricsCollection) (bool, string) {
 	missingMetricLabels := make(map[string]string)
 	missingMetricLabelsNames := make([]string, 0)
 	for metric, labels := range oldMetricsCollection.LabelsByMetric {
@@ -89,6 +95,35 @@ func TestMetrics(t *testing.T) {
 	}
 	sort.Strings(missingMetricLabelsNames)
 
+	if len(missingMetricLabelsNames) > 0 {
+		ll := make([]string, 0)
+		for _, metric := range missingMetricLabelsNames {
+			labels := missingMetricLabels[metric]
+			ll = append(ll, metric+"\n"+labels)
+		}
+
+		return false, fmt.Sprintf("Missing metric's labels (%d metrics):\n%s", len(missingMetricLabelsNames), strings.Join(ll, "\n"))
+	}
+
+	return true, ""
+}
+
+func testForMissingMetrics(oldMetricsCollection, newMetricsCollection MetricsCollection) (bool, string) {
+	missingMetrics := make([]string, 0)
+	for metricName := range oldMetricsCollection.LabelsByMetric {
+		if _, ok := newMetricsCollection.LabelsByMetric[metricName]; !ok {
+			missingMetrics = append(missingMetrics, metricName)
+		}
+	}
+	sort.Strings(missingMetrics)
+	if len(missingMetrics) > 0 {
+		return false, fmt.Sprintf("Missing metrics:\n%s", strings.Join(missingMetrics, "\n"))
+	}
+
+	return true, ""
+}
+
+func dumpMetricsWithMultipleLabelSets(newMetricsCollection MetricsCollection) {
 	metricsWithMultipleLabels := make(map[string][]string)
 	for k, v := range newMetricsCollection.LabelsByMetric {
 		if len(v) > 1 {
@@ -113,30 +148,26 @@ func TestMetrics(t *testing.T) {
 		}
 	}
 
-	if getBool(printExtraMetrics) && len(extraMetrics) > 0 {
-		fmt.Printf("Extra metrics (%d items):\n    %s\n\n", len(extraMetrics), strings.Join(extraMetrics, "\n    "))
-	}
-
-	if getBool(printMultipleLabels) && len(metricsWithMultipleLabels) > 0 {
-		ss := make([]string, 0)
+	if len(metricsWithMultipleLabels) > 0 {
+		ss := make([]string, 0, len(metricsWithMultipleLabels))
 		for k, v := range metricsWithMultipleLabels {
 			ss = append(ss, fmt.Sprintf("%s\n        %s", k, strings.Join(v, "\n        ")))
 		}
 		fmt.Printf("Some metrics were collected multiple times with extra labels (%d items):\n    %s\n\n", len(metricsWithMultipleLabels), strings.Join(ss, "\n    "))
 	}
+}
 
-	if len(missingMetrics) > 0 {
-		t.Errorf("Missing metrics:\n%s", strings.Join(missingMetrics, "\n"))
-	}
-
-	if len(missingMetricLabelsNames) > 0 {
-		ll := make([]string, 0)
-		for _, metric := range missingMetricLabelsNames {
-			labels := missingMetricLabels[metric]
-			ll = append(ll, metric+"\n"+labels)
+func dumpExtraMetrics(newMetricsCollection, oldMetricsCollection MetricsCollection) {
+	extraMetrics := make([]string, 0)
+	for metricName := range newMetricsCollection.LabelsByMetric {
+		if _, ok := oldMetricsCollection.LabelsByMetric[metricName]; !ok {
+			extraMetrics = append(extraMetrics, metricName)
 		}
+	}
+	sort.Strings(extraMetrics)
 
-		t.Errorf("Missing metric's labels (%d metrics):\n%s", len(missingMetricLabelsNames), strings.Join(ll, "\n"))
+	if len(extraMetrics) > 0 {
+		fmt.Printf("Extra metrics (%d items):\n    %s\n\n", len(extraMetrics), strings.Join(extraMetrics, "\n    "))
 	}
 }
 
