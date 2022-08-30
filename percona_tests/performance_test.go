@@ -47,11 +47,11 @@ func TestPerformance(t *testing.T) {
 
 	var updated, original *StatsData
 	t.Run("upstream exporter", func(t *testing.T) {
-		updated = doTestStats(t, repeatCount, scrapesCount, "../percona_tests/postgres_exporter")
+		updated = doTestStats(t, repeatCount, scrapesCount, "assets/postgres_exporter")
 	})
 
 	t.Run("percona exporter", func(t *testing.T) {
-		original = doTestStats(t, repeatCount, scrapesCount, "../percona_tests/postgres_exporter_percona")
+		original = doTestStats(t, repeatCount, scrapesCount, "assets/postgres_exporter_percona")
 	})
 
 	printStats(original, updated)

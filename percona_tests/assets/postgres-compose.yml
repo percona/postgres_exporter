@@ -19,7 +19,12 @@ services:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
     volumes:
-      - test_db_postgres:/docker-entrypoint-initdb.d/
+      - postgres-test-srv-vol:/docker-entrypoint-initdb.d/
+    networks:
+      - postgres-test-srv-net
 
 volumes:
-  test_db_postgres:
+  postgres-test-srv-vol:
+
+networks:
+  postgres-test-srv-net:

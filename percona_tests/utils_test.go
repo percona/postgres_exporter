@@ -30,7 +30,7 @@ const (
 )
 
 func launchExporter(fileName string) (cmd *exec.Cmd, port int, collectOutput func() string, _ error) {
-	lines, err := os.ReadFile("test.exporter-flags.txt")
+	lines, err := os.ReadFile("assets/test.exporter-flags.txt")
 	if err != nil {
 		return nil, 0, nil, errors.Wrapf(err, "Unable to read exporter args file")
 	}
