@@ -118,9 +118,12 @@ func stopExporter(cmd *exec.Cmd, collectOutput func() string) error {
 
 	return nil
 }
-
 func tryGetMetrics(port int) (string, error) {
-	uri := fmt.Sprintf("http://127.0.0.1:%d/metrics", port)
+	return tryGetMetricsFrom(port, "metrics")
+}
+
+func tryGetMetricsFrom(port int, endpoint string) (string, error) {
+	uri := fmt.Sprintf("http://127.0.0.1:%d/%s", port, endpoint)
 	client := new(http.Client)
 
 	request, err := http.NewRequest("GET", uri, nil)

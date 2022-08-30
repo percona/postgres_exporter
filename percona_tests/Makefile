@@ -3,21 +3,28 @@
 
 # measures avg scrape time and compares old vs new exporters
 test-performance:
-	go test -v -run '^TestPerformance$\' -args -doRun=true
+	go test -v -run '^TestPerformance$$' -args -doRun=true
 
 extraMetrics = false
 multipleLabels = false
 dumpMetrics = false
-# verifies metrics list old vs new and fails if some old metrics missing or labels on them missing
-# optionally can dump any extra metrics or metrics collected multiple times with different labels
+
 test-metrics:
-	go test -v -run '^TestMissingMetrics$\' -args -doRun=true
+	go test -v -run '^TestMissingMetrics$$' -args -doRun=true
 
 test-labels:
-	go test -v -run '^TestMissingLabels$\' -args -doRun=true
+	go test -v -run '^TestMissingLabels$$' -args -doRun=true
+
+test-resolutions-duplicates:
+	go test -v -run '^TestResolutionsMetricDuplicates$$' -args -doRun=true
+
+test-resolutions:
+	go test -v -run '^TestResolutions$$' -args -doRun=true
 
 dump-metrics:
-	go test -v -run '^TestDumpMetrics$\' -args -doRun=true -extraMetrics=$(extraMetrics) -multipleLabels=$(multipleLabels) -dumpMetrics=$(dumpMetrics)
+	go test -v -run '^TestDumpMetrics$$' -args -doRun=true -extraMetrics=$(extraMetrics) -multipleLabels=$(multipleLabels) -dumpMetrics=$(dumpMetrics)
+
+test-consistency: test-metrics test-resolutions test-resolutions-duplicates
 
 #########################
 ### env preparation

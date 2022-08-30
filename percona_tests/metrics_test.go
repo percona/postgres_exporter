@@ -104,6 +104,136 @@ func TestDumpMetrics(t *testing.T) {
 	dumpMetricsInfo(oldMetricsCollection, newMetricsCollection)
 }
 
+const highResolutionEndpoint = "metrics?collect%5B%5D=custom_query.hr&collect%5B%5D=exporter&collect%5B%5D=standard.go&collect%5B%5D=standard.process"
+const medResolutionEndpoint = "metrics?collect%5B%5D=custom_query.mr"
+const lowResolutionEndpoint = "metrics?collect%5B%5D=custom_query.lr"
+
+func TestResolutionsMetricDuplicates(t *testing.T) {
+	if !getBool(doRun) {
+		t.Skip("For manual runs only through make")
+		return
+	}
+
+	hrMetrics, err := getMetricsFrom(updatedExporterFileName, highResolutionEndpoint)
+	if err != nil {
+		t.Error(err)
+		return
+	}
+
+	mrMetrics, err := getMetricsFrom(updatedExporterFileName, medResolutionEndpoint)
+	if err != nil {
+		t.Error(err)
+		return
+	}
+
+	lrMetrics, err := getMetricsFrom(updatedExporterFileName, lowResolutionEndpoint)
+	if err != nil {
+		t.Error(err)
+		return
+	}
+
+	hrMetricsColl := parseMetricsCollection(hrMetrics)
+	mrMetricsColl := parseMetricsCollection(mrMetrics)
+	lrMetricsColl := parseMetricsCollection(lrMetrics)
+
+	ms := make(map[string][]string)
+	addMetrics(ms, hrMetricsColl.MetricNamesWithLabels, "HR")
+	addMetrics(ms, mrMetricsColl.MetricNamesWithLabels, "MR")
+	addMetrics(ms, lrMetricsColl.MetricNamesWithLabels, "LR")
+
+	count := 0
+	msg := ""
+	for metric, resolutions := range ms {
+		if len(resolutions) > 1 {
+			count++
+			msg += fmt.Sprintf("'%s' is duplicated in %s\n", metric, resolutions)
+		}
+	}
+
+	if count > 0 {
+		t.Errorf("Found %d duplicated metrics:\n%s", count, msg)
+	}
+}
+
+func addMetrics(ms map[string][]string, metrics []string, resolution string) {
+	for _, m := range metrics {
+		if m == "" || strings.HasPrefix(m, "# ") {
+			continue
+		}
+
+		if val, ok := ms[m]; ok {
+			val = append(val, resolution)
+			ms[m] = val
+		} else {
+			ms[m] = []string{resolution}
+		}
+	}
+}
+
+func TestResolutions(t *testing.T) {
+	if !getBool(doRun) {
+		t.Skip("For manual runs only through make")
+		return
+	}
+
+	t.Run("TestLowResolution", func(t *testing.T) {
+		testResolution(t, lowResolutionEndpoint, "Low")
+	})
+
+	t.Run("TestMediumResolution", func(t *testing.T) {
+		testResolution(t, medResolutionEndpoint, "Medium")
+	})
+}
+
+func testResolution(t *testing.T, resolutionEp, resolutionName string) {
+	newMetrics, err := getMetricsFrom(updatedExporterFileName, resolutionEp)
+	if err != nil {
+		t.Error(err)
+		return
+	}
+
+	oldMetrics, err := getMetricsFrom(oldExporterFileName, resolutionEp)
+	if err != nil {
+		t.Error(err)
+		return
+	}
+
+	oldMetricsCollection := parseMetricsCollection(oldMetrics)
+	newMetricsCollection := parseMetricsCollection(newMetrics)
+
+	missingCount := 0
+	missingMetrics := ""
+	for _, metric := range oldMetricsCollection.MetricNamesWithLabels {
+		if metric == "" || strings.HasPrefix(metric, "# ") {
+			continue
+		}
+
+		if !contains(newMetricsCollection.MetricNamesWithLabels, metric) {
+			missingCount++
+			missingMetrics += fmt.Sprintf("%s\n", metric)
+		}
+	}
+	if missingCount > 0 {
+		t.Errorf("%d metrics are missing in new exporter for %s resolution:\n%s", missingCount, resolutionName, missingMetrics)
+	}
+
+	extraCount := 0
+	extraMetrics := ""
+	for _, metric := range newMetricsCollection.MetricNamesWithLabels {
+		if metric == "" || strings.HasPrefix(metric, "# ") {
+			continue
+		}
+
+		if !contains(oldMetricsCollection.MetricNamesWithLabels, metric) {
+			extraCount++
+			extraMetrics += fmt.Sprintf("%s\n", metric)
+		}
+	}
+	if extraCount > 0 {
+		t.Errorf("%d metrics are redundant in new exporter for %s resolution:\n%s", extraCount, resolutionName, extraMetrics)
+	}
+}
+
 func dumpMetricsInfo(oldMetricsCollection, newMetricsCollection MetricsCollection) {
 	if getBool(dumpMetricsFlag) {
 		dumpMetrics(oldMetricsCollection, newMetricsCollection)
@@ -355,12 +485,16 @@ func getMetricNames(metrics []string) []string {
 }
 
 func getMetrics(fileName string) (string, error) {
+	return getMetricsFrom(fileName, "metrics")
+}
+
+func getMetricsFrom(fileName, endpoint string) (string, error) {
 	cmd, port, collectOutput, err := launchExporter(fileName)
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to launch exporter")
 	}
 
-	metrics, err := tryGetMetrics(port)
+	metrics, err := tryGetMetricsFrom(port, endpoint)
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to get metrics")
 	}
