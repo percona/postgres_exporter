@@ -49,8 +49,6 @@ func TestMissingMetrics(t *testing.T) {
 	oldMetricsCollection := parseMetricsCollection(oldMetrics)
 	newMetricsCollection := parseMetricsCollection(newMetrics)
 
-	dumpMetricsInfo(oldMetricsCollection, newMetricsCollection)
-
 	if ok, msg := testForMissingMetrics(oldMetricsCollection, newMetricsCollection); !ok {
 		t.Error(msg)
 	}
@@ -76,8 +74,6 @@ func TestMissingLabels(t *testing.T) {
 
 	oldMetricsCollection := parseMetricsCollection(oldMetrics)
 	newMetricsCollection := parseMetricsCollection(newMetrics)
-
-	dumpMetricsInfo(oldMetricsCollection, newMetricsCollection)
 
 	if ok, msg := testForMissingMetricsLabels(oldMetricsCollection, newMetricsCollection); !ok {
 		t.Error(msg)
