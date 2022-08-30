@@ -117,7 +117,7 @@ func testForMissingMetrics(oldMetricsCollection, newMetricsCollection MetricsCol
 	}
 	sort.Strings(missingMetrics)
 	if len(missingMetrics) > 0 {
-		return false, fmt.Sprintf("Missing metrics:\n%s", strings.Join(missingMetrics, "\n"))
+		return false, fmt.Sprintf("Missing metrics (%d items):\n%s", len(missingMetrics), strings.Join(missingMetrics, "\n"))
 	}
 
 	return true, ""
