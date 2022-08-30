@@ -112,24 +112,24 @@ func stopExporter(cmd *exec.Cmd, collectOutput func() string) error {
 	return nil
 }
 
-func tryGetMetrics(port int) error {
+func tryGetMetrics(port int) (string, error) {
 	uri := fmt.Sprintf("http://127.0.0.1:%d/metrics", port)
 	client := new(http.Client)
 
 	request, err := http.NewRequest("GET", uri, nil)
 	if err != nil {
-		return err
+		return "", err
 	}
 	request.Header.Add("Accept-Encoding", "gzip")
 
 	response, err := client.Do(request)
 
 	if err != nil {
-		return fmt.Errorf("failed to get response from exporters web interface: %w", err)
+		return "", fmt.Errorf("failed to get response from exporters web interface: %w", err)
 	}
 
 	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to get response from exporters web interface: %w", err)
+		return "", fmt.Errorf("failed to get response from exporters web interface: %w", err)
 	}
 
 	// Check that the server actually sent compressed data
@@ -139,7 +139,7 @@ func tryGetMetrics(port int) error {
 	case "gzip":
 		reader, err = gzip.NewReader(response.Body)
 		if err != nil {
-			return fmt.Errorf("failed to create gzip reader: %w", err)
+			return "", fmt.Errorf("failed to create gzip reader: %w", err)
 		}
 		defer reader.Close()
 	default:
@@ -149,20 +149,20 @@ func tryGetMetrics(port int) error {
 	buf := new(strings.Builder)
 	_, err = io.Copy(buf, reader)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	rr := buf.String()
 	if rr == "" {
-		return fmt.Errorf("failed to read response")
+		return "", fmt.Errorf("failed to read response")
 	}
 
 	err = response.Body.Close()
 	if err != nil {
-		return fmt.Errorf("failed to close response: %w", err)
+		return "", fmt.Errorf("failed to close response: %w", err)
 	}
 
-	return nil
+	return rr, nil
 }
 
 func checkPort(port int) bool {
@@ -178,11 +178,10 @@ func checkPort(port int) bool {
 func waitForExporter(port int) error {
 	watchdog := exporterWaitTimeoutMs
 
-	for ; tryGetMetrics(port) != nil && watchdog > 0; watchdog-- {
-		time.Sleep(5 * time.Millisecond)
-		if watchdog < 1000 {
-			time.Sleep(1 * time.Millisecond)
-		}
+	_, e := tryGetMetrics(port)
+	for ; e != nil && watchdog > 0; watchdog-- {
+		time.Sleep(1 * time.Millisecond)
+		_, e = tryGetMetrics(port)
 	}
 
 	if watchdog == 0 {

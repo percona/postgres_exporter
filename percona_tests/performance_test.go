@@ -133,7 +133,7 @@ func doTest(iterations int, fileName string) (cpu, hwm, data int64, _ error) {
 	total1 := getCPUTime(cmd.Process.Pid)
 
 	for i := 0; i < iterations; i++ {
-		err = tryGetMetrics(port)
+		_, err = tryGetMetrics(port)
 		if err != nil {
 			return 0, 0, 0, errors.Wrapf(err, "Failed to perform test iteration %d.%s", i, collectOutput())
 		}
