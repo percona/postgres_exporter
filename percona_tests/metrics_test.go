@@ -11,9 +11,22 @@ import (
 	"github.com/pkg/errors"
 )
 
-var dumpMetricsFlag = flag.Bool("dump-metrics", false, "")
-var printExtraMetrics = flag.Bool("extra-metrics", false, "")
-var printMultipleLabels = flag.Bool("multiple-labels", false, "")
+var dumpMetricsFlag = flag.Bool("dumpMetrics", false, "")
+var printExtraMetrics = flag.Bool("extraMetrics", false, "")
+var printMultipleLabels = flag.Bool("multipleLabels", false, "")
+
+type Metric struct {
+	name   string
+	labels string
+}
+
+type MetricsCollection struct {
+	RawMetricStr    string
+	RawMetricStrArr []string
+	MetricNames     []string
+	MetricsData     []Metric
+	LabelsByMetric  map[string][]string
+}
 
 func TestMetrics(t *testing.T) {
 	// put postgres_exporter and postgres_exporter_percona files in 'percona' folder
@@ -35,49 +48,39 @@ func TestMetrics(t *testing.T) {
 		return
 	}
 
-	newMetricsArr := strings.Split(newMetrics, "\n")
-	oldMetricsArr := strings.Split(oldMetrics, "\n")
+	oldMetricsCollection := parseMetricsCollection(oldMetrics)
+	newMetricsCollection := parseMetricsCollection(newMetrics)
 
-	oldMetricsArr = getMetricNames(oldMetricsArr)
-	newMetricsArr = getMetricNames(newMetricsArr)
-
-	if dumpMetricsFlag != nil && *dumpMetricsFlag {
-		dumpMetrics(oldMetricsArr, newMetricsArr)
+	if getBool(dumpMetricsFlag) {
+		dumpMetrics(oldMetricsCollection.RawMetricStrArr, newMetricsCollection.RawMetricStrArr)
 	}
 
-	oldMetricsData := parseMetrics(oldMetricsArr)
-	newMetricsData := parseMetrics(newMetricsArr)
-
-	//newMetricsData = append(newMetricsData[:3], newMetricsData[40:]...)
-
-	oldMetr := groupByMetrics(oldMetricsData)
-	newMetr := groupByMetrics(newMetricsData)
-
 	extraMetrics := make([]string, 0)
-	for key := range newMetr {
-		if _, ok := oldMetr[key]; !ok {
-			extraMetrics = append(extraMetrics, key)
+	for metricName := range newMetricsCollection.LabelsByMetric {
+		if _, ok := oldMetricsCollection.LabelsByMetric[metricName]; !ok {
+			extraMetrics = append(extraMetrics, metricName)
 		}
 	}
 	sort.Strings(extraMetrics)
 
 	missingMetrics := make([]string, 0)
-	for key := range oldMetr {
-		if _, ok := newMetr[key]; !ok {
-			missingMetrics = append(missingMetrics, key)
+	for metricName := range oldMetricsCollection.LabelsByMetric {
+		if _, ok := newMetricsCollection.LabelsByMetric[metricName]; !ok {
+			missingMetrics = append(missingMetrics, metricName)
 		}
 	}
 	sort.Strings(missingMetrics)
 
 	missingMetricLabels := make(map[string]string)
 	missingMetricLabelsNames := make([]string, 0)
-	for metric, labels := range oldMetr {
+	for metric, labels := range oldMetricsCollection.LabelsByMetric {
+		// skip version info label mismatch
 		if metric == "postgres_exporter_build_info" || metric == "go_info" {
 			continue
 		}
 
-		if _, ok := newMetr[metric]; ok {
-			newLabels := newMetr[metric]
+		if _, ok := newMetricsCollection.LabelsByMetric[metric]; ok {
+			newLabels := newMetricsCollection.LabelsByMetric[metric]
 			if !arrIsSubsetOf(labels, newLabels) {
 				missingMetricLabels[metric] = fmt.Sprintf("    expected: %s\n    actual:   %s", labels, newLabels)
 				missingMetricLabelsNames = append(missingMetricLabelsNames, metric)
@@ -87,7 +90,7 @@ func TestMetrics(t *testing.T) {
 	sort.Strings(missingMetricLabelsNames)
 
 	metricsWithMultipleLabels := make(map[string][]string)
-	for k, v := range newMetr {
+	for k, v := range newMetricsCollection.LabelsByMetric {
 		if len(v) > 1 {
 			found := false
 			for i := 0; !found && i < len(v); i++ {
@@ -137,13 +140,28 @@ func TestMetrics(t *testing.T) {
 	}
 }
 
+func parseMetricsCollection(metricRaw string) MetricsCollection {
+	rawMetricsArr := strings.Split(metricRaw, "\n")
+	metricNamesArr := getMetricNames(rawMetricsArr)
+	metrics := parseMetrics(metricNamesArr)
+	labelsByMetrics := groupByMetrics(metrics)
+
+	return MetricsCollection{
+		MetricNames:     metricNamesArr,
+		MetricsData:     metrics,
+		RawMetricStr:    metricRaw,
+		RawMetricStrArr: rawMetricsArr,
+		LabelsByMetric:  labelsByMetrics,
+	}
+}
+
 func getBool(val *bool) bool {
 	return val != nil && *val
 }
 
 func arrIsSubsetOf(a, b []string) bool {
 	if len(a) == 0 {
-		return false
+		return len(b) == 0
 	}
 
 	for _, x := range a {
@@ -161,9 +179,11 @@ func contains(s []string, e string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
+// groupByMetrics returns labels grouped by metric
 func groupByMetrics(metrics []Metric) map[string][]string {
 	mtr := make(map[string][]string)
 
@@ -182,35 +202,31 @@ func groupByMetrics(metrics []Metric) map[string][]string {
 }
 
 func parseMetrics(metrics []string) []Metric {
-	metricsData := make([]Metric, 0)
-	for i := 0; i < len(metrics); i++ {
-		str := metrics[i]
-		if str == "" || strings.HasPrefix(str, "# ") {
+	metricsLength := len(metrics)
+	metricsData := make([]Metric, 0, metricsLength)
+	for i := 0; i < metricsLength; i++ {
+		metricRawStr := metrics[i]
+		if metricRawStr == "" || strings.HasPrefix(metricRawStr, "# ") {
 			continue
 		}
 
 		var mName, mLabels string
-		if strings.Contains(str, "{") {
-			mName = str[:strings.Index(str, "{")]
-			mLabels = str[strings.Index(str, "{")+1 : len(str)-1]
+		if strings.Contains(metricRawStr, "{") {
+			mName = metricRawStr[:strings.Index(metricRawStr, "{")]
+			mLabels = metricRawStr[strings.Index(metricRawStr, "{")+1 : len(metricRawStr)-1]
 		} else {
-			mName = str
+			mName = metricRawStr
 		}
 
-		mstr := Metric{
+		metric := Metric{
 			name:   mName,
 			labels: mLabels,
 		}
 
-		metricsData = append(metricsData, mstr)
+		metricsData = append(metricsData, metric)
 	}
 
 	return metricsData
-}
-
-type Metric struct {
-	name   string
-	labels string
 }
 
 func dumpMetrics(oldMetricsArr, newMetricsArr []string) {
