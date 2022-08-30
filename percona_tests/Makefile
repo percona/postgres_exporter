@@ -18,7 +18,7 @@ test-metrics:
 
 # download exporter from provided feature build's client binary url
 prepare-exporter:
-	go test -v env_prepare_test.go -run TestPrepareUpdatedExporter -args -doRun=true -url=$(url)
+	go test -v -run '^TestPrepareUpdatedExporter$\' -args -doRun=true -url=$(url)
 
 prepare-exporter-from-repo:
 	make -C ../ build && cp ../postgres_exporter assets/postgres_exporter
