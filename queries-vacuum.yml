@@ -1,0 +1,10 @@
+pg_stat_txid:
+    query: "SELECT pg_database.datname, age(pg_database.datfrozenxid) as datfrozenxid FROM pg_database"
+    cache_seconds: 30
+    metrics:
+      - datname:
+          usage: "LABEL"
+          description: "Name of the database"
+      - datfrozenxid:
+          usage: "GAUGE"
+          description: "Trx id used"
