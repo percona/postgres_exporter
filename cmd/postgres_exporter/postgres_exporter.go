@@ -542,6 +542,8 @@ func WithConstantLabels(s string) ExporterOpt {
 		e.constantLabels = parseConstLabels(s)
 		if e.collectorName != "" {
 			e.constantLabels["collector"] = e.collectorName
+		} else {
+			e.constantLabels["collector"] = "exporter"
 		}
 	}
 }
