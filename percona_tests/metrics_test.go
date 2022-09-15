@@ -183,6 +183,10 @@ func TestResolutions(t *testing.T) {
 	t.Run("TestMediumResolution", func(t *testing.T) {
 		testResolution(t, medResolutionEndpoint, "Medium")
 	})
+
+	t.Run("TestHighResolution", func(t *testing.T) {
+		testResolution(t, highResolutionEndpoint, "High")
+	})
 }
 
 func testResolution(t *testing.T, resolutionEp, resolutionName string) {
