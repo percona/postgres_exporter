@@ -162,8 +162,7 @@ func addMetrics(ms map[string][]string, metrics []string, resolution string) {
 		}
 
 		if val, ok := ms[m]; ok {
-			val = append(val, resolution)
-			ms[m] = val
+			ms[m] = append(ms[m], resolution)
 		} else {
 			ms[m] = []string{resolution}
 		}
