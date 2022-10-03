@@ -30,7 +30,7 @@ test-consistency: test-metrics test-resolutions test-resolutions-duplicates
 ### env preparation
 
 # download exporter from provided feature build's client binary url
-prepare-exporter:
+prepare-exporter-from-fb:
 	go test -v -run '^TestPrepareUpdatedExporter$\' -args -doRun=true -url=$(url)
 
 prepare-exporter-from-repo:

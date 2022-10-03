@@ -1,6 +1,14 @@
-### integration tests for exporter update
+## integration tests for exporter update
 
-basic usage:
+### Fast start:
+
+run
+
+    make prepare-env-from-repo
+
+then run any of the ```make test-*```
+
+### A bit of details:
 
 1.  unpack original exporter
 
@@ -9,7 +17,7 @@ basic usage:
 
 2.a. download updated exporter from specific feature build
 
-    make prepare-exporter url="<feature build client binary url>"
+    make prepare-exporter-from-fb url="<feature build client binary url>"
 
 2.b. or use current repo as updated exporter
 
