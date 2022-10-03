@@ -203,7 +203,7 @@ func testResolution(t *testing.T, resolutionEp, resolutionName string) {
 	missingCount := 0
 	missingMetrics := ""
 	for _, metric := range oldMetricsCollection.MetricNamesWithLabels {
-		if metric == "" || strings.HasPrefix(metric, "# ") {
+		if metric == "" || strings.HasPrefix(metric, "# ") || metric == "go_memstats_gc_cpu_fraction" {
 			continue
 		}
 
@@ -213,7 +213,7 @@ func testResolution(t *testing.T, resolutionEp, resolutionName string) {
 		}
 	}
 	if missingCount > 0 {
-		t.Errorf("%d metrics are missing in new exporter for %s resolution:\n%s", missingCount, resolutionName, missingMetrics)
+		t.Errorf("%d metric(s) are missing in new exporter for %s resolution:\n%s", missingCount, resolutionName, missingMetrics)
 	}
 
 	extraCount := 0
@@ -282,6 +282,10 @@ func testForMissingMetricsLabels(oldMetricsCollection, newMetricsCollection Metr
 func testForMissingMetrics(oldMetricsCollection, newMetricsCollection MetricsCollection) (bool, string) {
 	missingMetrics := make([]string, 0)
 	for metricName := range oldMetricsCollection.LabelsByMetric {
+		if metricName == "go_memstats_gc_cpu_fraction" {
+			continue
+		}
+
 		if _, ok := newMetricsCollection.LabelsByMetric[metricName]; !ok {
 			missingMetrics = append(missingMetrics, metricName)
 		}
