@@ -89,16 +89,19 @@ func TestDumpMetrics(t *testing.T) {
 	}
 
 	var ep string
-	if endpointFlag == nil || *endpointFlag == "" {
-		ep = "metrics"
-	} else if *endpointFlag == "hr" {
+	switch *endpointFlag {
+	case "hr":
 		ep = highResolutionEndpoint
-	} else if *endpointFlag == "mr" {
+		break
+	case "mr":
 		ep = medResolutionEndpoint
-	} else if *endpointFlag == "lr" {
+		break
+	case "lr":
 		ep = lowResolutionEndpoint
-	} else {
+		break
+	default:
 		ep = "metrics"
+		break
 	}
 
 	newMetrics, err := getMetricsFrom(updatedExporterFileName, ep)
