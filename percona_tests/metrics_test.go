@@ -14,6 +14,7 @@ import (
 var dumpMetricsFlag = flag.Bool("dumpMetrics", false, "")
 var printExtraMetrics = flag.Bool("extraMetrics", false, "")
 var printMultipleLabels = flag.Bool("multipleLabels", false, "")
+var endpointFlag = flag.String("endpoint", "", "")
 
 type Metric struct {
 	name   string
@@ -86,13 +87,26 @@ func TestDumpMetrics(t *testing.T) {
 		return
 	}
 
-	newMetrics, err := getMetrics(updatedExporterFileName)
+	var ep string
+	if endpointFlag == nil || *endpointFlag == "" {
+		ep = "metrics"
+	} else if *endpointFlag == "hr" {
+		ep = highResolutionEndpoint
+	} else if *endpointFlag == "mr" {
+		ep = medResolutionEndpoint
+	} else if *endpointFlag == "lr" {
+		ep = lowResolutionEndpoint
+	} else {
+		ep = "metrics"
+	}
+
+	newMetrics, err := getMetricsFrom(updatedExporterFileName, ep)
 	if err != nil {
 		t.Error(err)
 		return
 	}
 
-	oldMetrics, err := getMetrics(oldExporterFileName)
+	oldMetrics, err := getMetricsFrom(oldExporterFileName, ep)
 	if err != nil {
 		t.Error(err)
 		return
