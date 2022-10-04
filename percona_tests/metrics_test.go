@@ -92,16 +92,12 @@ func TestDumpMetrics(t *testing.T) {
 	switch *endpointFlag {
 	case "hr":
 		ep = highResolutionEndpoint
-		break
 	case "mr":
 		ep = medResolutionEndpoint
-		break
 	case "lr":
 		ep = lowResolutionEndpoint
-		break
 	default:
 		ep = "metrics"
-		break
 	}
 
 	newMetrics, err := getMetricsFrom(updatedExporterFileName, ep)
