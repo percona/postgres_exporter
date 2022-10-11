@@ -219,7 +219,7 @@ func testResolution(t *testing.T, resolutionEp, resolutionName string) {
 	missingLabelsCount := 0
 	missingLabels := ""
 	for _, oldMetric := range oldMetricsCollection.MetricsData {
-		if oldMetric.name == "" || strings.HasPrefix(oldMetric.name, "# ") || metric == "go_memstats_gc_cpu_fraction" {
+		if oldMetric.name == "" || strings.HasPrefix(oldMetric.name, "# ") || oldMetric.name == "go_memstats_gc_cpu_fraction" {
 			continue
 		}
 
