@@ -38,6 +38,11 @@ var pgDatabase = map[string]*prometheus.Desc{
 		"Disk space used by the database",
 		[]string{"datname", "server"}, nil,
 	),
+	"frozen_xid": prometheus.NewDesc(
+		"pg_database_frozen_xid",
+		"All transaction IDs before this one have been replaced with a permanent (“frozen”) transaction ID in this database",
+		[]string{"datname", "server"}, nil,
+	),
 }
 
 func (PGDatabaseCollector) Update(ctx context.Context, server *server, ch chan<- prometheus.Metric) error {
@@ -48,6 +53,7 @@ func (PGDatabaseCollector) Update(ctx context.Context, server *server, ch chan<-
 	rows, err := db.QueryContext(ctx,
 		`SELECT pg_database.datname
 		,pg_database_size(pg_database.datname)
+		,pg_database.datfrozenxid
 		FROM pg_database;`)
 	if err != nil {
 		return err
@@ -57,13 +63,19 @@ func (PGDatabaseCollector) Update(ctx context.Context, server *server, ch chan<-
 	for rows.Next() {
 		var datname string
 		var size int64
-		if err := rows.Scan(&datname, &size); err != nil {
+		var frozenXid uint32
+		if err := rows.Scan(&datname, &size, &frozenXid); err != nil {
 			return err
 		}
 
 		ch <- prometheus.MustNewConstMetric(
 			pgDatabase["size_bytes"],
 			prometheus.GaugeValue, float64(size), datname, server.GetName(),
+		)
+
+		ch <- prometheus.MustNewConstMetric(
+			pgDatabase["frozen_xid"],
+			prometheus.GaugeValue, float64(frozenXid), datname, server.GetName(),
 		)
 	}
 	if err := rows.Err(); err != nil {
