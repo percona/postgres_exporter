@@ -70,9 +70,9 @@ var queryOverrides = map[string][]OverrideQuery{
 			ON tmp.mode=tmp2.mode and pg_database.oid = tmp2.database ORDER BY 1`,
 		},
 	},
-  "pg_lock_conflicts": {
-    {
-      semver.MustParseRange(">0.0.0"),
+	"pg_lock_conflicts": {
+		{
+			semver.MustParseRange(">0.0.0"),
 			`SELECT blockinga.pid AS blocking_pid, count(*) as count
 			FROM pg_catalog.pg_locks blockedl
 			JOIN pg_stat_activity blockeda ON blockedl.pid = blockeda.pid
@@ -81,8 +81,8 @@ var queryOverrides = map[string][]OverrideQuery{
 			JOIN pg_stat_activity blockinga ON blockingl.pid = blockinga.pid
 			WHERE NOT blockedl.granted
 			group by blocking_pid`,
-    },
-  },
+		},
+	},
 	"pg_stat_replication": {
 		{
 			semver.MustParseRange(">=10.0.0"),
