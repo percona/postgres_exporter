@@ -20,7 +20,6 @@ var pgExtensions = map[string]*prometheus.Desc{
 			"name",
 			"default_version",
 			"installed_version",
-			"comment",
 		},
 		prometheus.Labels{},
 	),
@@ -89,7 +88,7 @@ func (e *ExtensionsCollector) scrapeInstalledExtensions(ctx context.Context, db 
 }
 
 func (e *ExtensionsCollector) scrapeAvailableExtensions(ctx context.Context, db *sql.DB, ch chan<- prometheus.Metric) error {
-	rows, err := db.QueryContext(ctx, `SELECT name, default_version, installed_version, comment FROM pg_available_extensions`)
+	rows, err := db.QueryContext(ctx, `SELECT name, default_version, installed_version FROM pg_available_extensions`)
 	if err != nil {
 		return err
 	}
@@ -99,16 +98,14 @@ func (e *ExtensionsCollector) scrapeAvailableExtensions(ctx context.Context, db 
 		var name sql.NullString
 		var defaultVersion sql.NullString
 		var installedVersion sql.NullString
-		var comment sql.NullString
-
-		if err := rows.Scan(&name, &defaultVersion, &installedVersion, &comment); err != nil {
+		if err := rows.Scan(&name, &defaultVersion, &installedVersion); err != nil {
 			return err
 		}
 
 		ch <- prometheus.MustNewConstMetric(
 			pgExtensions["pg_available_extensions"],
 			prometheus.GaugeValue, 1,
-			name.String, defaultVersion.String, installedVersion.String, comment.String,
+			name.String, defaultVersion.String, installedVersion.String,
 		)
 	}
 	return nil
