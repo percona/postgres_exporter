@@ -80,10 +80,14 @@ func (e *ExtensionsCollector) scrapeInstalledExtensions(ctx context.Context, db 
 
 		ch <- prometheus.MustNewConstMetric(
 			pgExtensions["pg_extensions"],
-			prometheus.GaugeValue, 1,
-			extname, strconv.FormatBool(extrelocatable), extversion,
+			prometheus.GaugeValue,
+			1,
+			extname,
+			strconv.FormatBool(extrelocatable),
+			extversion,
 		)
 	}
+
 	return nil
 }
 
@@ -104,9 +108,15 @@ func (e *ExtensionsCollector) scrapeAvailableExtensions(ctx context.Context, db 
 
 		ch <- prometheus.MustNewConstMetric(
 			pgExtensions["pg_available_extensions"],
-			prometheus.GaugeValue, 1,
-			name.String, defaultVersion.String, installedVersion.String,
+			prometheus.GaugeValue,
+			1,
+			name.String,
+			defaultVersion.String,
+			installedVersion.String,
 		)
 	}
+
 	return nil
 }
+
+var _ = (Collector)(&ExtensionsCollector{})
