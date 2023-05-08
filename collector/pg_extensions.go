@@ -27,9 +27,9 @@ var pgExtensions = map[string]*prometheus.Desc{
 		"pg_extensions",
 		"Installed extensions",
 		[]string{
-			"extname",
-			"extrelocatable",
-			"extversion",
+			"name",
+			"relocatable",
+			"version",
 		},
 		prometheus.Labels{},
 	),
