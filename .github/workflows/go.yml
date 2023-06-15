@@ -27,7 +27,7 @@ jobs:
       name: CI
     steps:
     - name: Set up Go release
-      uses: percona-platform/setup-go@v2
+      uses: percona-platform/setup-go@v4
       with:
         go-version: ${{ matrix.go-version }}
     - name: Checkout code
