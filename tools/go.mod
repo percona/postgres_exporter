@@ -6,7 +6,7 @@ require (
 	github.com/golangci/golangci-lint v1.53.3
 	github.com/prometheus/promu v0.12.0
 	github.com/reviewdog/reviewdog v0.14.2
-	honnef.co/go/tools v0.4.3
+	honnef.co/go/tools v0.4.5
 )
 
 require (
@@ -207,7 +207,7 @@ require (
 	golang.org/x/sys v0.9.0 // indirect
 	golang.org/x/text v0.10.0 // indirect
 	golang.org/x/time v0.3.0 // indirect
-	golang.org/x/tools v0.9.3 // indirect
+	golang.org/x/tools v0.9.4-0.20230601214343-86c93e8732cc // indirect
 	golang.org/x/xerrors v0.0.0-20220907171357-04be3eba64a2 // indirect
 	google.golang.org/api v0.114.0 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
