@@ -119,6 +119,7 @@ var queryOverrides = map[string][]OverrideQuery{
 			`
 			SELECT slot_name, database, active, pg_xlog_location_diff(pg_current_xlog_location(), restart_lsn)
 			FROM pg_replication_slots
+                        WHERE pg_is_in_recovery() = False
 			`,
 		},
 		{
@@ -126,6 +127,7 @@ var queryOverrides = map[string][]OverrideQuery{
 			`
 			SELECT slot_name, database, active, pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn)
 			FROM pg_replication_slots
+                        WHERE pg_is_in_recovery() = False
 			`,
 		},
 	},
