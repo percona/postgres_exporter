@@ -744,7 +744,7 @@ func (e *Exporter) scrape(ch chan<- prometheus.Metric) {
 	e.totalScrapes.Inc()
 
 	dsns := e.dsn
-	autoDiscoveryLimitOK := e.getTotalDatabaseCount() <= 10
+	autoDiscoveryLimitOK := e.getTotalDatabaseCount() <= e.autoDiscoverDatabasesLimit
 	level.Debug(logger).Log(fmt.Sprintf("Auto discovery is: %t", autoDiscoveryLimitOK))
 	if e.autoDiscoverDatabases && autoDiscoveryLimitOK {
 		dsns = e.discoverDatabaseDSNs()
