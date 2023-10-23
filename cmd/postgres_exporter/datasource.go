@@ -25,12 +25,41 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
+func (e *Exporter) getTotalDatabaseCount() int {
+	count := 0
+	for _, dsn := range e.dsn {
+		server, err := e.servers.GetServer(dsn)
+		if err != nil {
+			level.Error(logger).Log("msg", "Error opening connection to database", "dsn", loggableDSN(dsn), "err", err)
+			continue
+		}
+
+		databaseNames, err := queryDatabases(server)
+		if err != nil {
+			level.Error(logger).Log("msg", "Error opening connection to database", "dsn", loggableDSN(dsn), "err", err)
+			continue
+		}
+		for _, databaseName := range databaseNames {
+			if contains(e.excludeDatabases, databaseName) {
+				continue
+			}
+
+			if len(e.includeDatabases) != 0 && !contains(e.includeDatabases, databaseName) {
+				continue
+			}
+
+			count++
+		}
+	}
+
+	return count
+}
+
 func (e *Exporter) discoverDatabaseDSNs() []string {
 	// connstring syntax is complex (and not sure if even regular).
 	// we don't need to parse it, so just superficially validate that it starts
 	// with a valid-ish keyword pair
 	connstringRe := regexp.MustCompile(`^ *[a-zA-Z0-9]+ *= *[^= ]+`)
-
 	dsns := make(map[string]struct{})
 	for _, dsn := range e.dsn {
 		var dsnURI *url.URL

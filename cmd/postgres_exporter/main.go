@@ -41,16 +41,17 @@ var (
 		"web.config",
 		"[EXPERIMENTAL] Path to config yaml file that can enable TLS or authentication.",
 	).Default("").String()
-	metricPath             = kingpin.Flag("web.telemetry-path", "Path under which to expose metrics.").Default("/metrics").Envar("PG_EXPORTER_WEB_TELEMETRY_PATH").String()
-	disableDefaultMetrics  = kingpin.Flag("disable-default-metrics", "Do not include default metrics.").Default("false").Envar("PG_EXPORTER_DISABLE_DEFAULT_METRICS").Bool()
-	disableSettingsMetrics = kingpin.Flag("disable-settings-metrics", "Do not include pg_settings metrics.").Default("false").Envar("PG_EXPORTER_DISABLE_SETTINGS_METRICS").Bool()
-	autoDiscoverDatabases  = kingpin.Flag("auto-discover-databases", "Whether to discover the databases on a server dynamically.").Default("false").Envar("PG_EXPORTER_AUTO_DISCOVER_DATABASES").Bool()
-	onlyDumpMaps           = kingpin.Flag("dumpmaps", "Do not run, simply dump the maps.").Bool()
-	constantLabelsList     = kingpin.Flag("constantLabels", "A list of label=value separated by comma(,).").Default("").Envar("PG_EXPORTER_CONSTANT_LABELS").String()
-	excludeDatabases       = kingpin.Flag("exclude-databases", "A list of databases to remove when autoDiscoverDatabases is enabled").Default("").Envar("PG_EXPORTER_EXCLUDE_DATABASES").String()
-	includeDatabases       = kingpin.Flag("include-databases", "A list of databases to include when autoDiscoverDatabases is enabled").Default("").Envar("PG_EXPORTER_INCLUDE_DATABASES").String()
-	metricPrefix           = kingpin.Flag("metric-prefix", "A metric prefix can be used to have non-default (not \"pg\") prefixes for each of the metrics").Default("pg").Envar("PG_EXPORTER_METRIC_PREFIX").String()
-	logger                 = log.NewNopLogger()
+	metricPath                 = kingpin.Flag("web.telemetry-path", "Path under which to expose metrics.").Default("/metrics").Envar("PG_EXPORTER_WEB_TELEMETRY_PATH").String()
+	disableDefaultMetrics      = kingpin.Flag("disable-default-metrics", "Do not include default metrics.").Default("false").Envar("PG_EXPORTER_DISABLE_DEFAULT_METRICS").Bool()
+	disableSettingsMetrics     = kingpin.Flag("disable-settings-metrics", "Do not include pg_settings metrics.").Default("false").Envar("PG_EXPORTER_DISABLE_SETTINGS_METRICS").Bool()
+	autoDiscoverDatabases      = kingpin.Flag("auto-discover-databases", "Whether to discover the databases on a server dynamically.").Default("false").Envar("PG_EXPORTER_AUTO_DISCOVER_DATABASES").Bool()
+	autoDiscoverDatabasesLimit = kingpin.Flag("auto-discover-databases-limit", "If total number of databases is bigger than limit, auto discover will be turned off.").Default("-1").Envar("PG_EXPORTER_AUTO_DISCOVER_DATABASES_LIMIT").Int()
+	onlyDumpMaps               = kingpin.Flag("dumpmaps", "Do not run, simply dump the maps.").Bool()
+	constantLabelsList         = kingpin.Flag("constantLabels", "A list of label=value separated by comma(,).").Default("").Envar("PG_EXPORTER_CONSTANT_LABELS").String()
+	excludeDatabases           = kingpin.Flag("exclude-databases", "A list of databases to remove when autoDiscoverDatabases is enabled.").Default("").Envar("PG_EXPORTER_EXCLUDE_DATABASES").String()
+	includeDatabases           = kingpin.Flag("include-databases", "A list of databases to include when autoDiscoverDatabases is enabled.").Default("").Envar("PG_EXPORTER_INCLUDE_DATABASES").String()
+	metricPrefix               = kingpin.Flag("metric-prefix", "A metric prefix can be used to have non-default (not \"pg\") prefixes for each of the metrics.").Default("pg").Envar("PG_EXPORTER_METRIC_PREFIX").String()
+	logger                     = log.NewNopLogger()
 )
 
 // Metric name parts.

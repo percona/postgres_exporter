@@ -3,12 +3,13 @@ package main
 import (
 	"crypto/sha256"
 	"fmt"
+	"io/ioutil"
+	"path/filepath"
+
 	"github.com/blang/semver"
 	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
 	"gopkg.in/alecthomas/kingpin.v2"
-	"io/ioutil"
-	"path/filepath"
 )
 
 type MetricResolution string
@@ -48,6 +49,7 @@ func initializePerconaExporters(dsn []string, opts []ExporterOpt) (func(), *Expo
 		DisableDefaultMetrics(true),
 		DisableSettingsMetrics(true),
 		AutoDiscoverDatabases(*autoDiscoverDatabases),
+		AutoDiscoverDatabasesLimit(*autoDiscoverDatabasesLimit),
 		WithUserQueriesEnabled(map[MetricResolution]bool{
 			HR: *collectCustomQueryHr,
 			MR: false,
@@ -64,6 +66,7 @@ func initializePerconaExporters(dsn []string, opts []ExporterOpt) (func(), *Expo
 		DisableDefaultMetrics(true),
 		DisableSettingsMetrics(true),
 		AutoDiscoverDatabases(*autoDiscoverDatabases),
+		AutoDiscoverDatabasesLimit(*autoDiscoverDatabasesLimit),
 		WithUserQueriesEnabled(map[MetricResolution]bool{
 			HR: false,
 			MR: *collectCustomQueryMr,
@@ -80,6 +83,7 @@ func initializePerconaExporters(dsn []string, opts []ExporterOpt) (func(), *Expo
 		DisableDefaultMetrics(true),
 		DisableSettingsMetrics(true),
 		AutoDiscoverDatabases(*autoDiscoverDatabases),
+		AutoDiscoverDatabasesLimit(*autoDiscoverDatabasesLimit),
 		WithUserQueriesEnabled(map[MetricResolution]bool{
 			HR: false,
 			MR: false,

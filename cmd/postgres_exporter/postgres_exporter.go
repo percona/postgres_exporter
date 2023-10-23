@@ -469,6 +469,7 @@ type Exporter struct {
 	builtinMetricMaps map[string]intermediateMetricMap
 
 	disableDefaultMetrics, disableSettingsMetrics, autoDiscoverDatabases bool
+	autoDiscoverDatabasesLimit                                           int
 
 	excludeDatabases []string
 	includeDatabases []string
@@ -520,6 +521,13 @@ func DisableSettingsMetrics(b bool) ExporterOpt {
 func AutoDiscoverDatabases(b bool) ExporterOpt {
 	return func(e *Exporter) {
 		e.autoDiscoverDatabases = b
+	}
+}
+
+// AutoDiscoverDatabasesLimit return limit for Auto Discover.
+func AutoDiscoverDatabasesLimit(limit int) ExporterOpt {
+	return func(e *Exporter) {
+		e.autoDiscoverDatabasesLimit = limit
 	}
 }
 
@@ -736,7 +744,9 @@ func (e *Exporter) scrape(ch chan<- prometheus.Metric) {
 	e.totalScrapes.Inc()
 
 	dsns := e.dsn
-	if e.autoDiscoverDatabases {
+	autoDiscoveryLimitOK := e.getTotalDatabaseCount() <= 10
+	level.Debug(logger).Log(fmt.Sprintf("Auto discovery is: %t", autoDiscoveryLimitOK))
+	if e.autoDiscoverDatabases && autoDiscoveryLimitOK {
 		dsns = e.discoverDatabaseDSNs()
 	}
 
