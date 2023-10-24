@@ -7,14 +7,14 @@ import (
 	"bufio"
 	_ "embed"
 	"fmt"
-	"github.com/stretchr/testify/assert"
-	"io/ioutil"
 	"net/http"
 	"regexp"
 	"sort"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 //go:embed percona-reference-metrics.txt
@@ -34,7 +34,7 @@ func TestReferenceCompatibility(t *testing.T) {
 	resp, err := client.Do(req)
 	assert.Nil(t, err)
 	defer resp.Body.Close()
-	currentMetricsBytes, err := ioutil.ReadAll(resp.Body)
+	currentMetricsBytes, err := os.ReadAll(resp.Body)
 	assert.Nil(t, err)
 
 	currentMetrics := toMap(t, string(currentMetricsBytes))
