@@ -11,11 +11,11 @@ require (
 	github.com/montanaflynn/stats v0.7.1
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.16.0
-	github.com/prometheus/client_model v0.4.0
+	github.com/prometheus/client_model v0.5.0
 	github.com/prometheus/common v0.44.0
 	github.com/prometheus/exporter-toolkit v0.10.0
 	github.com/smartystreets/goconvey v1.8.1
-	github.com/stretchr/testify v1.8.2
+	github.com/stretchr/testify v1.8.4
 	github.com/tklauser/go-sysconf v0.3.12
 	golang.org/x/sys v0.13.0
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c
@@ -50,5 +50,5 @@ require (
 	golang.org/x/sync v0.2.0 // indirect
 	golang.org/x/text v0.13.0 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
-	google.golang.org/protobuf v1.30.0 // indirect
+	google.golang.org/protobuf v1.31.0 // indirect
 )
