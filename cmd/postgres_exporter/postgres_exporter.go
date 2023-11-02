@@ -183,7 +183,7 @@ var builtinMetricMaps = map[string]intermediateMetricMap{
 		0,
 	},
 	"pg_autovacuum_workers": {
-	    map[string]ColumnMapping{
+    map[string]ColumnMapping{
 			"duration":       {GAUGE, "Duration in seconds that autovacuum is running for one table", nil, nil},
 			"mode":        {LABEL, "Type of vacuum", nil, nil},
 			"database":          {LABEL, "Name of database", nil, nil},
