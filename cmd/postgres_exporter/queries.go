@@ -105,85 +105,7 @@ var queryOverrides = map[string][]OverrideQuery{
 			`,
 		},
 	},
-	"pg_autovacuum_workers": {
-		{
-			semver.MustParseRange(">=11.0.0"),
-			`
-			SELECT
-			EXTRACT(EPOCH FROM (now() - a.xact_start))::int AS duration,
-			CASE WHEN a.query ~*'^autovacuum.*to prevent wraparound' THEN 'wraparound' WHEN a.query ~*'^vacuum' THEN 'user' ELSE 'regular' END AS mode,
-			p.datname AS database, p.relid::regclass AS relation,p.phase,
-			p.heap_blks_total * current_setting('block_size')::int AS table_size,
-			pg_total_relation_size(relid) AS total_size,
-			p.heap_blks_scanned * current_setting('block_size')::int AS scanned,
-			p.heap_blks_vacuumed * current_setting('block_size')::int AS vacuumed,
-			round(100.0 * p.heap_blks_scanned / p.heap_blks_total, 0) AS scanned_pct,
-			round(100.0 * p.heap_blks_vacuumed / p.heap_blks_total, 0) AS vacuumed_pct,
-			p.index_vacuum_count
-			FROM pg_stat_progress_vacuum p JOIN pg_stat_activity a using (pid)
-			`,
-		},
-	},
-	"pg_wraparound": {
-		{
-      semver.MustParseRange(">=9.4.0"),
-			`
-      WITH max_age AS (
-      SELECT 2000000000 as max_old_xid
-      , setting AS autovacuum_freeze_max_age
-      FROM pg_catalog.pg_settings
-      WHERE name = 'autovacuum_freeze_max_age' )
-      , per_database_stats AS (
-      SELECT datname
-      , m.max_old_xid::int
-      , m.autovacuum_freeze_max_age::int
-      , age(d.datfrozenxid) AS oldest_current_xid
-      FROM pg_catalog.pg_database d
-      JOIN max_age m ON (true)
-      WHERE d.datallowconn )
-      SELECT max(oldest_current_xid) AS oldest_current_xid
-      , max(ROUND(100*(oldest_current_xid/max_old_xid::float))) AS percent_towards_wraparound
-      , max(ROUND(100*(oldest_current_xid/autovacuum_freeze_max_age::float))) AS percent_towards_emergency_autovacuum
-      FROM per_database_stats
-			`,
-    },
-	},
-	"pg_table_size": {
-    {
-      semver.MustParseRange(">=9.4.0"),
-      `
-      SELECT nspname||'.'||relname AS table_name,pg_relation_size (C.oid) AS bytes,age(C.relfrozenxid) as xid_age
-      FROM pg_class C
-      LEFT JOIN pg_namespace N ON (N.oid = C.relnamespace)
-      WHERE nspname NOT IN ('pg_catalog','information_schema')
-      AND C.relkind not in ('i','v')
-      AND nspname !~ '^pg_toast'
-			`,
-		},
-	},
-	"pg_autovacuum_disabled": {
-    {
-      semver.MustParseRange(">=9.4.0"),
-      `
-      select n.nspname||'.'||c.relname,age(c.relfrozenxid) as xid_age from pg_class c
-      LEFT JOIN pg_namespace n ON (n.oid = c.relnamespace)
-      where c.relkind = 'r' and 'autovacuum_enabled=off'=ANY(c.reloptions)
-      `,
-		},
-	},
-	"pg_index_size": {
-    {
-      semver.MustParseRange(">=9.4.0"),
-      `
-      SELECT relnamespace as schema,relname AS index_name,pg_relation_size (C .oid) AS bytes
-      FROM pg_class C
-      LEFT JOIN pg_namespace N ON (N.oid = C .relnamespace)
-      WHERE nspname NOT IN ('pg_catalog','information_schema')
-      AND C .relkind = 'i'
-      AND nspname !~ '^pg_toast'
-			`,
-		},
-	},
+
 	"pg_stat_archiver": {
 		{
 			semver.MustParseRange(">=9.4.0"),
@@ -203,7 +125,6 @@ var queryOverrides = map[string][]OverrideQuery{
 			SELECT
 				pg_database.datname,
 				tmp.state,
-				tmp2.pid,
 				tmp2.usename,
 				tmp2.application_name,
 				COALESCE(count,0) as count,
@@ -220,14 +141,13 @@ var queryOverrides = map[string][]OverrideQuery{
 			LEFT JOIN
 			(
 				SELECT
-				  pid,
 					datname,
 					state,
 					usename,
 					application_name,
 					count(*) AS count,
 					MAX(EXTRACT(EPOCH FROM now() - xact_start))::float AS max_tx_duration
-				FROM pg_stat_activity GROUP BY datname,state,usename,application_name,pid) AS tmp2
+				FROM pg_stat_activity GROUP BY datname,state,usename,application_name) AS tmp2
 				ON tmp.state = tmp2.state AND pg_database.datname = tmp2.datname
 			`,
 		},

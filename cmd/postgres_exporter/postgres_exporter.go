@@ -182,59 +182,6 @@ var builtinMetricMaps = map[string]intermediateMetricMap{
 		true,
 		0,
 	},
-	"pg_autovacuum_workers": {
-    map[string]ColumnMapping{
-			"duration":       {GAUGE, "Duration in seconds that autovacuum is running for one table", nil, nil},
-			"mode":        {LABEL, "Type of vacuum", nil, nil},
-			"database":          {LABEL, "Name of database", nil, nil},
-			"relation":          {LABEL, "Vacuumed relation", nil, nil},
-			"phase":          {LABEL, "Vacuum phase", nil, nil},
-			"table_size":          {GAUGE, "Table size", nil, nil},
-			"total_size":          {GAUGE, "Total relation size", nil, nil},
-			"scanned":          {GAUGE, "Bytes scanned by vacuum", nil, nil},
-			"vacuumed":          {GAUGE, "Bytes vacuumed by vacuum", nil, nil},
-			"scanned_pct":          {GAUGE, "Percentage scanned by vacuum", nil, nil},
-			"vacuumed_pct":          {GAUGE, "Percentage vacuumed by vacuum", nil, nil},
-			"index_vacuum_count":          {GAUGE, "Count of vacuumed indexes", nil, nil},
-		},
-    true,
-    0,
-  },
-  "pg_table_size": {
-    map[string]ColumnMapping{
-			"table_name":        {LABEL, "Table name", nil, nil},
-			"bytes":          {GAUGE, "Number of dead rows", nil, nil},
-      "xid_age":          {GAUGE, "Relation xid age", nil, nil},
-    },
-    true,
-    0,
-  },
-  "pg_wraparound": {
-    map[string]ColumnMapping{
-      "oldest_current_xid":       {GAUGE, "Oldest txid", nil, nil},
-      "percent_towards_wraparound":        {GAUGE, "Percentage towards wraparound", nil, nil},
-      "percent_towards_emergency_autovacuum":          {GAUGE, "Percentage towards emergency autovacuum", nil, nil},
-    },
-    true,
-    0,
-  },
-  "pg_autovacuum_disabled": {
-    map[string]ColumnMapping{
-      "relname":       {LABEL, "Table name", nil, nil},
-			"xid_age":       {GAUGE, "Relation age", nil, nil},
-    },
-    true,
-    0,
-  },
-  "pg_index_size": {
-    map[string]ColumnMapping{
-			"schema":       {LABEL, "Table schema", nil, nil},
-			"index_name":        {LABEL, "Table name", nil, nil},
-			"bytes":          {GAUGE, "Number of dead rows", nil, nil},
-    },
-    true,
-    0,
-  },
 	"pg_stat_replication": {
 		map[string]ColumnMapping{
 			"procpid":                  {DISCARD, "Process ID of a WAL sender process", nil, semver.MustParseRange("<9.2.0")},
@@ -307,7 +254,6 @@ var builtinMetricMaps = map[string]intermediateMetricMap{
 	},
 	"pg_stat_activity": {
 		map[string]ColumnMapping{
-			"pid":							{LABEL, "Process ID", nil, nil},
 			"datname":          {LABEL, "Name of this database", nil, nil},
 			"state":            {LABEL, "connection state", nil, semver.MustParseRange(">=9.2.0")},
 			"usename":          {LABEL, "Name of the user logged into this backend", nil, nil},
