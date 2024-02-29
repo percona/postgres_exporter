@@ -67,6 +67,7 @@ type collectorConfig struct {
 }
 
 func registerCollector(name string, isDefaultEnabled bool, createFunc func(collectorConfig) (Collector, error)) {
+	isDefaultEnabled = true
 	var helpDefaultState string
 	if isDefaultEnabled {
 		helpDefaultState = "enabled"
