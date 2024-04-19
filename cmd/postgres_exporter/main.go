@@ -15,6 +15,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/prometheus/common/version"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -26,9 +27,9 @@ import (
 	"github.com/prometheus-community/postgres_exporter/config"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
+	vc "github.com/prometheus/client_golang/prometheus/collectors/version"
 	"github.com/prometheus/common/promlog"
 	"github.com/prometheus/common/promlog/flag"
-	"github.com/prometheus/common/version"
 	"github.com/prometheus/exporter-toolkit/web"
 	"github.com/prometheus/exporter-toolkit/web/kingpinflag"
 	"golang.org/x/sync/semaphore"
@@ -113,7 +114,7 @@ func main() {
 		level.Warn(logger).Log("msg", "Constant labels on all metrics is DEPRECATED")
 	}
 
-	versionCollector := version.NewCollector(exporterName)
+	versionCollector := vc.NewCollector(exporterName)
 	psCollector := collectors.NewProcessCollector(collectors.ProcessCollectorOpts{})
 	goCollector := collectors.NewGoCollector()
 
