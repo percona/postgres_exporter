@@ -24,7 +24,7 @@ import (
 const userTableSubsystem = "stat_user_tables"
 
 func init() {
-	registerCollector(userTableSubsystem, defaultEnabled, NewPGStatUserTablesCollector)
+	registerCollector(userTableSubsystem, defaultDisabled, NewPGStatUserTablesCollector)
 }
 
 type PGStatUserTablesCollector struct {

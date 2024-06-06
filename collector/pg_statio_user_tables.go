@@ -24,7 +24,7 @@ import (
 const statioUserTableSubsystem = "statio_user_tables"
 
 func init() {
-	registerCollector(statioUserTableSubsystem, defaultEnabled, NewPGStatIOUserTablesCollector)
+	registerCollector(statioUserTableSubsystem, defaultDisabled, NewPGStatIOUserTablesCollector)
 }
 
 type PGStatIOUserTablesCollector struct {
