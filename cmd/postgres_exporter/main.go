@@ -15,7 +15,6 @@ package main
 
 import (
 	"fmt"
-	"github.com/prometheus/common/promslog"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -30,6 +29,7 @@ import (
 	vc "github.com/prometheus/client_golang/prometheus/collectors/version"
 	"github.com/prometheus/common/promlog"
 	"github.com/prometheus/common/promlog/flag"
+	"github.com/prometheus/common/promslog"
 	"github.com/prometheus/common/version"
 	"github.com/prometheus/exporter-toolkit/web"
 	"github.com/prometheus/exporter-toolkit/web/kingpinflag"
