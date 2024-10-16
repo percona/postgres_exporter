@@ -15,6 +15,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/prometheus/common/promslog"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -151,7 +152,7 @@ func main() {
 
 	level.Info(logger).Log("msg", "Listening on address", "address", *webConfig.WebListenAddresses)
 	srv := &http.Server{}
-	if err := web.ListenAndServe(srv, webConfig, logger); err != nil {
+	if err := web.ListenAndServe(srv, webConfig, promslog.New(&promslog.Config{})); err != nil {
 		level.Error(logger).Log("msg", "Error running HTTP server", "err", err)
 		os.Exit(1)
 	}
