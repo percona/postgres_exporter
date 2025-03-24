@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	stdlog "log"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -14,8 +15,6 @@ import (
 
 	"github.com/alecthomas/kingpin/v2"
 	"github.com/blang/semver/v4"
-	"github.com/go-kit/log"
-	"github.com/go-kit/log/level"
 	"github.com/prometheus-community/postgres_exporter/collector"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -43,7 +42,7 @@ var (
 
 // Handler returns a http.Handler that serves metrics. Can be used instead of
 // run for hooking up custom HTTP servers.
-func Handler(logger log.Logger, dsns []string, connSema *semaphore.Weighted, globalCollectors map[string]prometheus.Collector) http.Handler {
+func Handler(logger *slog.Logger, dsns []string, connSema *semaphore.Weighted, globalCollectors map[string]prometheus.Collector) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seconds, err := strconv.Atoi(r.Header.Get("X-Prometheus-Scrape-Timeout-Seconds"))
 		// To support also older ones vmagents.
@@ -55,7 +54,7 @@ func Handler(logger log.Logger, dsns []string, connSema *semaphore.Weighted, glo
 		defer cancel()
 
 		filters := r.URL.Query()["collect[]"]
-		level.Debug(logger).Log("msg", "Collect query", "filters", filters)
+		logger.Debug("Collect query", "filters", filters)
 
 		var f Filters
 		if len(filters) == 0 {
@@ -88,7 +87,7 @@ func Handler(logger log.Logger, dsns []string, connSema *semaphore.Weighted, glo
 		// Delegate http serving to Prometheus client library, which will call collector.Collect.
 		h := promhttp.HandlerFor(registry, promhttp.HandlerOpts{
 			ErrorHandling: promhttp.ContinueOnError,
-			ErrorLog:      stdlog.New(log.NewStdlibAdapter(logger), "handler", 0),
+			ErrorLog:      stdlog.New(os.Stderr, "handler", 0),
 		})
 
 		h.ServeHTTP(w, r)
@@ -113,7 +112,7 @@ func makeRegistry(ctx context.Context, dsns []string, connSema *semaphore.Weight
 	registry := prometheus.NewRegistry()
 
 	excludedDatabases := strings.Split(*excludeDatabases, ",")
-	logger.Log("msg", "Excluded databases", "databases", fmt.Sprintf("%v", excludedDatabases))
+	logger.Info("Excluded databases", "databases", fmt.Sprintf("%v", excludedDatabases))
 
 	queriesPath := map[MetricResolution]string{
 		HR: *collectCustomQueryHrDirectory,
@@ -212,7 +211,7 @@ func makeRegistry(ctx context.Context, dsns []string, connSema *semaphore.Weight
 			collector.WithConnectionsSemaphore(connSema),
 		)
 		if err != nil {
-			level.Error(logger).Log("msg", "Failed to create PostgresCollector", "err", err.Error())
+			logger.Error("Failed to create PostgresCollector", "err", err.Error())
 		} else {
 			registry.MustRegister(pe)
 		}
@@ -225,11 +224,11 @@ func (e *Exporter) loadCustomQueries(res MetricResolution, version semver.Versio
 	if e.userQueriesPath[res] != "" {
 		fi, err := os.ReadDir(e.userQueriesPath[res])
 		if err != nil {
-			level.Error(logger).Log("msg", fmt.Sprintf("failed read dir %q for custom query", e.userQueriesPath[res]),
+			logger.Error(fmt.Sprintf("failed read dir %q for custom query", e.userQueriesPath[res]),
 				"err", err)
 			return
 		}
-		level.Debug(logger).Log("msg", fmt.Sprintf("reading dir %q for custom query", e.userQueriesPath[res]))
+		logger.Debug(fmt.Sprintf("reading dir %q for custom query", e.userQueriesPath[res]))
 
 		for _, v := range fi {
 			if v.IsDir() {
@@ -248,7 +247,7 @@ func (e *Exporter) addCustomQueriesFromFile(path string, version semver.Version,
 	// Calculate the hashsum of the useQueries
 	userQueriesData, err := os.ReadFile(path)
 	if err != nil {
-		level.Error(logger).Log("msg", "Failed to reload user queries:"+path, "err", err)
+		logger.Error("Failed to reload user queries:"+path, "err", err)
 		e.userQueriesError.WithLabelValues(path, "").Set(1)
 		return
 	}
@@ -256,7 +255,7 @@ func (e *Exporter) addCustomQueriesFromFile(path string, version semver.Version,
 	hashsumStr := fmt.Sprintf("%x", sha256.Sum256(userQueriesData))
 
 	if err := addQueries(userQueriesData, version, server); err != nil {
-		level.Error(logger).Log("msg", "Failed to reload user queries:"+path, "err", err)
+		logger.Error("Failed to reload user queries:"+path, "err", err)
 		e.userQueriesError.WithLabelValues(path, hashsumStr).Set(1)
 		return
 	}

@@ -101,7 +101,7 @@ func main() {
 	logger.Info("Excluded databases", "databases", fmt.Sprintf("%v", excludedDatabases))
 
 	// if *queriesPath != "" {
-	//	level.Warn(logger).Log("msg", "The extended queries.yaml config is DEPRECATED", "file", *queriesPath)
+	//	logger.Warn("The extended queries.yaml config is DEPRECATED", "file", *queriesPath)
 	// }
 
 	if *autoDiscoverDatabases || *excludeDatabases != "" || *includeDatabases != "" {
@@ -147,7 +147,7 @@ func main() {
 
 	http.HandleFunc("/probe", handleProbe(logger, excludedDatabases, connSema))
 
-	level.Info(logger).Log("msg", "Listening on address", "address", *webConfig.WebListenAddresses)
+	logger.Info("Listening on address", "address", *webConfig.WebListenAddresses)
 	srv := &http.Server{}
 	if err := web.ListenAndServe(srv, webConfig, promslog.New(&promslog.Config{})); err != nil {
 		logger.Error("Error running HTTP server", "err", err)
