@@ -80,7 +80,7 @@ func (pc *ProbeCollector) Describe(ch chan<- *prometheus.Desc) {
 
 func (pc *ProbeCollector) Collect(ch chan<- prometheus.Metric) {
 	if err := pc.connSema.Acquire(pc.ctx, 1); err != nil {
-		level.Warn(pc.logger).Log("msg", "Failed to acquire semaphore", "err", err)
+		pc.logger.Warn("Failed to acquire semaphore", "err", err)
 		return
 	}
 	defer pc.connSema.Release(1)

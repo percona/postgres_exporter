@@ -3,9 +3,10 @@ package collector
 import (
 	"context"
 	"database/sql"
-	"github.com/go-kit/log"
-	"github.com/prometheus/client_golang/prometheus"
+	"log/slog"
 	"strconv"
+
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 func init() {
@@ -36,11 +37,11 @@ var pgExtensions = map[string]*prometheus.Desc{
 }
 
 type ExtensionsCollector struct {
-	logger log.Logger
+	log *slog.Logger
 }
 
 func NewExtensionsCollector(collectorConfig collectorConfig) (Collector, error) {
-	return &ExtensionsCollector{logger: collectorConfig.logger}, nil
+	return &ExtensionsCollector{log: collectorConfig.logger}, nil
 }
 
 func (e *ExtensionsCollector) Update(ctx context.Context, instance *instance, ch chan<- prometheus.Metric) error {

@@ -189,7 +189,7 @@ func (p PostgresCollector) Collect(ch chan<- prometheus.Metric) {
 
 	if p.connSema != nil {
 		if err := p.connSema.Acquire(p.ctx, 1); err != nil {
-			level.Warn(p.logger).Log("msg", "Failed to acquire semaphore", "err", err)
+			p.logger.Warn("Failed to acquire semaphore", "err", err)
 			return
 		}
 		defer p.connSema.Release(1)

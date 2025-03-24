@@ -48,11 +48,6 @@ func (e *Exporter) discoverDatabaseDSNs() []string {
 			continue
 		}
 
-		server, err := e.servers.GetServer(dsn)
-		if err != nil {
-			logger.Error("Error opening connection to database", "dsn", loggableDSN(dsn), "err", err)
-			continue
-		}
 		dsns[dsn] = struct{}{}
 
 		// If autoDiscoverDatabases is true, set first dsn as master database (Default: false)
@@ -102,7 +97,7 @@ func (e *Exporter) discoverDatabaseDSNs() []string {
 func (e *Exporter) getDatabaseNames(dsn string) ([]string, error) {
 	if e.connSema != nil {
 		if err := e.connSema.Acquire(e.ctx, 1); err != nil {
-			level.Warn(logger).Log("msg", "Failed to acquire semaphore", "err", err)
+			logger.Warn("Failed to acquire semaphore", "err", err)
 			return nil, err
 		}
 		defer e.connSema.Release(1)
@@ -110,14 +105,14 @@ func (e *Exporter) getDatabaseNames(dsn string) ([]string, error) {
 
 	server, err := e.GetServer(dsn)
 	if err != nil {
-		level.Error(logger).Log("msg", "Error opening connection to database", "dsn", loggableDSN(dsn), "err", err)
+		logger.Error("Error opening connection to database", "dsn", loggableDSN(dsn), "err", err)
 		return nil, err
 	}
 	defer server.Close()
 
 	dbNames, err := queryDatabases(e.ctx, server)
 	if err != nil {
-		level.Error(logger).Log("msg", "Error querying databases", "dsn", loggableDSN(dsn), "err", err)
+		logger.Error("Error querying databases", "dsn", loggableDSN(dsn), "err", err)
 		return nil, err
 	}
 

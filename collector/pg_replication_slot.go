@@ -96,6 +96,7 @@ var (
 	FROM pg_replication_slots;`
 	pgReplicationSlotNewQuery = `SELECT
 		slot_name,
+		plugin,
 		slot_type,
 		CASE WHEN pg_is_in_recovery() THEN
 		    pg_last_wal_receive_lsn() - '0/0'
