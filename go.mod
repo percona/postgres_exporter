@@ -1,19 +1,16 @@
 module github.com/prometheus-community/postgres_exporter
 
-go 1.22
+go 1.23.0
 
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/alecthomas/kingpin/v2 v2.4.0
 	github.com/blang/semver/v4 v4.0.0
-	github.com/go-kit/log v0.2.1
 	github.com/lib/pq v1.10.9
-	github.com/montanaflynn/stats v0.7.1
-	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.20.5
 	github.com/prometheus/client_model v0.6.1
-	github.com/prometheus/common v0.60.1
-	github.com/prometheus/exporter-toolkit v0.13.1
+	github.com/prometheus/common v0.62.0
+	github.com/prometheus/exporter-toolkit v0.14.0
 	github.com/smartystreets/goconvey v1.8.1
 	github.com/stretchr/testify v1.10.0
 	github.com/tklauser/go-sysconf v0.3.14
@@ -29,8 +26,6 @@ require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/coreos/go-systemd/v22 v22.5.0 // indirect
-	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/go-logfmt/logfmt v0.5.1 // indirect
 	github.com/gopherjs/gopherjs v1.17.2 // indirect
 	github.com/jpillora/backoff v1.0.0 // indirect
 	github.com/jtolds/gls v4.20.0+incompatible // indirect
@@ -47,9 +42,11 @@ require (
 	github.com/smarty/assertions v1.15.0 // indirect
 	github.com/tklauser/numcpus v0.8.0 // indirect
 	github.com/xhit/go-str2duration/v2 v2.1.0 // indirect
-	golang.org/x/crypto v0.31.0 // indirect
+	golang.org/x/crypto v0.32.0 // indirect
 	golang.org/x/net v0.33.0 // indirect
-	golang.org/x/oauth2 v0.23.0 // indirect
+	golang.org/x/oauth2 v0.24.0 // indirect
+	golang.org/x/sync v0.10.0 // indirect
+	golang.org/x/sys v0.29.0 // indirect
 	golang.org/x/text v0.21.0 // indirect
-	google.golang.org/protobuf v1.34.2 // indirect
+	google.golang.org/protobuf v1.36.1 // indirect
 )

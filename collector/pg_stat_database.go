@@ -16,9 +16,11 @@ package collector
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"log/slog"
+	"strings"
 
-	"github.com/go-kit/log"
-	"github.com/go-kit/log/level"
+	"github.com/blang/semver/v4"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -29,7 +31,7 @@ func init() {
 }
 
 type PGStatDatabaseCollector struct {
-	log log.Logger
+	log *slog.Logger
 }
 
 func NewPGStatDatabaseCollector(config collectorConfig) (Collector, error) {
@@ -206,36 +208,53 @@ var (
 		[]string{"datid", "datname"},
 		prometheus.Labels{},
 	)
-
-	statDatabaseQuery = `
-		SELECT
-			datid
-			,datname
-			,numbackends
-			,xact_commit
-			,xact_rollback
-			,blks_read
-			,blks_hit
-			,tup_returned
-			,tup_fetched
-			,tup_inserted
-			,tup_updated
-			,tup_deleted
-			,conflicts
-			,temp_files
-			,temp_bytes
-			,deadlocks
-			,blk_read_time
-			,blk_write_time
-			,stats_reset
-		FROM pg_stat_database;
-	`
+	statDatabaseActiveTime = prometheus.NewDesc(prometheus.BuildFQName(
+		namespace,
+		statDatabaseSubsystem,
+		"active_time_seconds_total",
+	),
+		"Time spent executing SQL statements in this database, in seconds",
+		[]string{"datid", "datname"},
+		prometheus.Labels{},
+	)
 )
+
+func statDatabaseQuery(columns []string) string {
+	return fmt.Sprintf("SELECT %s FROM pg_stat_database;", strings.Join(columns, ","))
+}
 
 func (c *PGStatDatabaseCollector) Update(ctx context.Context, instance *instance, ch chan<- prometheus.Metric) error {
 	db := instance.getDB()
+
+	columns := []string{
+		"datid",
+		"datname",
+		"numbackends",
+		"xact_commit",
+		"xact_rollback",
+		"blks_read",
+		"blks_hit",
+		"tup_returned",
+		"tup_fetched",
+		"tup_inserted",
+		"tup_updated",
+		"tup_deleted",
+		"conflicts",
+		"temp_files",
+		"temp_bytes",
+		"deadlocks",
+		"blk_read_time",
+		"blk_write_time",
+		"stats_reset",
+	}
+
+	activeTimeAvail := instance.version.GTE(semver.MustParse("14.0.0"))
+	if activeTimeAvail {
+		columns = append(columns, "active_time")
+	}
+
 	rows, err := db.QueryContext(ctx,
-		statDatabaseQuery,
+		statDatabaseQuery(columns),
 	)
 	if err != nil {
 		return err
@@ -244,10 +263,10 @@ func (c *PGStatDatabaseCollector) Update(ctx context.Context, instance *instance
 
 	for rows.Next() {
 		var datid, datname sql.NullString
-		var numBackends, xactCommit, xactRollback, blksRead, blksHit, tupReturned, tupFetched, tupInserted, tupUpdated, tupDeleted, conflicts, tempFiles, tempBytes, deadlocks, blkReadTime, blkWriteTime sql.NullFloat64
+		var numBackends, xactCommit, xactRollback, blksRead, blksHit, tupReturned, tupFetched, tupInserted, tupUpdated, tupDeleted, conflicts, tempFiles, tempBytes, deadlocks, blkReadTime, blkWriteTime, activeTime sql.NullFloat64
 		var statsReset sql.NullTime
 
-		err := rows.Scan(
+		r := []any{
 			&datid,
 			&datname,
 			&numBackends,
@@ -267,87 +286,97 @@ func (c *PGStatDatabaseCollector) Update(ctx context.Context, instance *instance
 			&blkReadTime,
 			&blkWriteTime,
 			&statsReset,
-		)
+		}
+
+		if activeTimeAvail {
+			r = append(r, &activeTime)
+		}
+
+		err := rows.Scan(r...)
 		if err != nil {
 			return err
 		}
 
 		if !datid.Valid {
-			level.Debug(c.log).Log("msg", "Skipping collecting metric because it has no datid")
+			c.log.Debug("Skipping collecting metric because it has no datid")
 			continue
 		}
 		if !datname.Valid {
-			level.Debug(c.log).Log("msg", "Skipping collecting metric because it has no datname")
+			c.log.Debug("Skipping collecting metric because it has no datname")
 			continue
 		}
 		if !numBackends.Valid {
-			level.Debug(c.log).Log("msg", "Skipping collecting metric because it has no numbackends")
+			c.log.Debug("Skipping collecting metric because it has no numbackends")
 			continue
 		}
 		if !xactCommit.Valid {
-			level.Debug(c.log).Log("msg", "Skipping collecting metric because it has no xact_commit")
+			c.log.Debug("Skipping collecting metric because it has no xact_commit")
 			continue
 		}
 		if !xactRollback.Valid {
-			level.Debug(c.log).Log("msg", "Skipping collecting metric because it has no xact_rollback")
+			c.log.Debug("Skipping collecting metric because it has no xact_rollback")
 			continue
 		}
 		if !blksRead.Valid {
-			level.Debug(c.log).Log("msg", "Skipping collecting metric because it has no blks_read")
+			c.log.Debug("Skipping collecting metric because it has no blks_read")
 			continue
 		}
 		if !blksHit.Valid {
-			level.Debug(c.log).Log("msg", "Skipping collecting metric because it has no blks_hit")
+			c.log.Debug("Skipping collecting metric because it has no blks_hit")
 			continue
 		}
 		if !tupReturned.Valid {
-			level.Debug(c.log).Log("msg", "Skipping collecting metric because it has no tup_returned")
+			c.log.Debug("Skipping collecting metric because it has no tup_returned")
 			continue
 		}
 		if !tupFetched.Valid {
-			level.Debug(c.log).Log("msg", "Skipping collecting metric because it has no tup_fetched")
+			c.log.Debug("Skipping collecting metric because it has no tup_fetched")
 			continue
 		}
 		if !tupInserted.Valid {
-			level.Debug(c.log).Log("msg", "Skipping collecting metric because it has no tup_inserted")
+			c.log.Debug("Skipping collecting metric because it has no tup_inserted")
 			continue
 		}
 		if !tupUpdated.Valid {
-			level.Debug(c.log).Log("msg", "Skipping collecting metric because it has no tup_updated")
+			c.log.Debug("Skipping collecting metric because it has no tup_updated")
 			continue
 		}
 		if !tupDeleted.Valid {
-			level.Debug(c.log).Log("msg", "Skipping collecting metric because it has no tup_deleted")
+			c.log.Debug("Skipping collecting metric because it has no tup_deleted")
 			continue
 		}
 		if !conflicts.Valid {
-			level.Debug(c.log).Log("msg", "Skipping collecting metric because it has no conflicts")
+			c.log.Debug("Skipping collecting metric because it has no conflicts")
 			continue
 		}
 		if !tempFiles.Valid {
-			level.Debug(c.log).Log("msg", "Skipping collecting metric because it has no temp_files")
+			c.log.Debug("Skipping collecting metric because it has no temp_files")
 			continue
 		}
 		if !tempBytes.Valid {
-			level.Debug(c.log).Log("msg", "Skipping collecting metric because it has no temp_bytes")
+			c.log.Debug("Skipping collecting metric because it has no temp_bytes")
 			continue
 		}
 		if !deadlocks.Valid {
-			level.Debug(c.log).Log("msg", "Skipping collecting metric because it has no deadlocks")
+			c.log.Debug("Skipping collecting metric because it has no deadlocks")
 			continue
 		}
 		if !blkReadTime.Valid {
-			level.Debug(c.log).Log("msg", "Skipping collecting metric because it has no blk_read_time")
+			c.log.Debug("Skipping collecting metric because it has no blk_read_time")
 			continue
 		}
 		if !blkWriteTime.Valid {
-			level.Debug(c.log).Log("msg", "Skipping collecting metric because it has no blk_write_time")
+			c.log.Debug("Skipping collecting metric because it has no blk_write_time")
+			continue
+		}
+		if activeTimeAvail && !activeTime.Valid {
+			c.log.Debug("Skipping collecting metric because it has no active_time")
 			continue
 		}
 
 		statsResetMetric := 0.0
 		if !statsReset.Valid {
-			level.Debug(c.log).Log("msg", "No metric for stats_reset, will collect 0 instead")
+			c.log.Debug("No metric for stats_reset, will collect 0 instead")
 		}
 		if statsReset.Valid {
 			statsResetMetric = float64(statsReset.Time.Unix())
@@ -473,6 +502,15 @@ func (c *PGStatDatabaseCollector) Update(ctx context.Context, instance *instance
 			statsResetMetric,
 			labels...,
 		)
+
+		if activeTimeAvail {
+			ch <- prometheus.MustNewConstMetric(
+				statDatabaseActiveTime,
+				prometheus.CounterValue,
+				activeTime.Float64/1000.0,
+				labels...,
+			)
+		}
 	}
 	return nil
 }

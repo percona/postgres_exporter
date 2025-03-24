@@ -170,7 +170,7 @@ var statBGWriter = map[string]*prometheus.Desc{
 	),
 }
 
-const statBGWriterQueryPrePG17 = `SELECT
+	statBGWriterQueryBefore17 = `SELECT
 		checkpoints_timed
 		,checkpoints_req
 		,checkpoint_write_time
@@ -184,33 +184,72 @@ const statBGWriterQueryPrePG17 = `SELECT
 		,stats_reset
 	FROM pg_stat_bgwriter;`
 
-const statBGWriterQueryPost17 = `SELECT
+	statBGWriterQueryAfter17 = `SELECT
 		buffers_clean
 		,maxwritten_clean
 		,buffers_alloc
 		,stats_reset
 	FROM pg_stat_bgwriter;`
+)
 
-const statCheckpointerQuery = `SELECT
-		num_timed
-		,num_requested
-		,restartpoints_timed
-		,restartpoints_req
-		,restartpoints_done
-		,write_time
-		,sync_time
-		,buffers_written
-		,stats_reset
-	FROM pg_stat_checkpointer;`
-
-func (p PGStatBGWriterCollector) Update(ctx context.Context, instance *instance, ch chan<- prometheus.Metric) error {
-	db := instance.getDB()
-
-	var cpt, cpr, bcp, bc, mwc, bb, bbf, ba sql.NullInt64
-	var cpwt, cpst sql.NullFloat64
-	var sr sql.NullTime
-
+func (PGStatBGWriterCollector) Update(ctx context.Context, instance *instance, ch chan<- prometheus.Metric) error {
 	if instance.version.GE(semver.MustParse("17.0.0")) {
+		db := instance.getDB()
+		row := db.QueryRowContext(ctx, statBGWriterQueryAfter17)
+
+		var bc, mwc, ba sql.NullInt64
+		var sr sql.NullTime
+
+		err := row.Scan(&bc, &mwc, &ba, &sr)
+		if err != nil {
+			return err
+		}
+
+		bcMetric := 0.0
+		if bc.Valid {
+			bcMetric = float64(bc.Int64)
+		}
+		ch <- prometheus.MustNewConstMetric(
+			statBGWriterBuffersCleanDesc,
+			prometheus.CounterValue,
+			bcMetric,
+		)
+		mwcMetric := 0.0
+		if mwc.Valid {
+			mwcMetric = float64(mwc.Int64)
+		}
+		ch <- prometheus.MustNewConstMetric(
+			statBGWriterMaxwrittenCleanDesc,
+			prometheus.CounterValue,
+			mwcMetric,
+		)
+		baMetric := 0.0
+		if ba.Valid {
+			baMetric = float64(ba.Int64)
+		}
+		ch <- prometheus.MustNewConstMetric(
+			statBGWriterBuffersAllocDesc,
+			prometheus.CounterValue,
+			baMetric,
+		)
+		srMetric := 0.0
+		if sr.Valid {
+			srMetric = float64(sr.Time.Unix())
+		}
+		ch <- prometheus.MustNewConstMetric(
+			statBGWriterStatsResetDesc,
+			prometheus.CounterValue,
+			srMetric,
+		)
+	} else {
+		db := instance.getDB()
+		row := db.QueryRowContext(ctx, statBGWriterQueryBefore17)
+
+		var cpt, cpr, bcp, bc, mwc, bb, bbf, ba sql.NullInt64
+		var cpwt, cpst sql.NullFloat64
+		var sr sql.NullTime
+
+		if instance.version.GE(semver.MustParse("17.0.0")) {
 		row := db.QueryRowContext(ctx,
 			statBGWriterQueryPost17)
 		err := row.Scan(&bc, &mwc, &ba, &sr)
@@ -355,7 +394,7 @@ func (p PGStatBGWriterCollector) Update(ctx context.Context, instance *instance,
 		srMetric,
 		"exporter",
 		instance.name,
-	)
+	)}
 
 	// TODO: analyze metrics below, why do we duplicate them?
 

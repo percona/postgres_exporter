@@ -20,7 +20,6 @@ import (
 	"time"
 
 	"github.com/blang/semver/v4"
-	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -72,7 +71,7 @@ func NewServer(dsn string, opts ...ServerOpt) (*Server, error) {
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 
-	level.Info(logger).Log("msg", "Established new database connection", "fingerprint", fingerprint)
+	logger.Info("Established new database connection", "fingerprint", fingerprint)
 
 	s := &Server{
 		db:     db,
@@ -99,7 +98,7 @@ func (s *Server) Close() error {
 func (s *Server) Ping() error {
 	if err := s.db.Ping(); err != nil {
 		if cerr := s.Close(); cerr != nil {
-			level.Error(logger).Log("msg", "Error while closing non-pinging DB connection", "server", s, "err", cerr)
+			logger.Error("Error while closing non-pinging DB connection", "server", s, "err", cerr)
 		}
 		return err
 	}
@@ -190,7 +189,7 @@ func (s *Servers) Close() {
 	defer s.m.Unlock()
 	for _, server := range s.servers {
 		if err := server.Close(); err != nil {
-			level.Error(logger).Log("msg", "Failed to close connection", "server", server, "err", err)
+			logger.Error("Failed to close connection", "server", server, "err", err)
 		}
 	}
 }

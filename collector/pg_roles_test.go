@@ -22,7 +22,7 @@ import (
 	"github.com/smartystreets/goconvey/convey"
 )
 
-func TestPgReplicationCollector(t *testing.T) {
+func TestPGRolesCollector(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("Error opening a stub db connection: %s", err)
@@ -31,27 +31,21 @@ func TestPgReplicationCollector(t *testing.T) {
 
 	inst := &instance{db: db}
 
-	columns := []string{"lag", "is_replica", "last_replay"}
-	rows := sqlmock.NewRows(columns).
-		AddRow(1000, 1, 3)
-	mock.ExpectQuery(sanitizeQuery(pgReplicationQuery)).WillReturnRows(rows)
+	mock.ExpectQuery(sanitizeQuery(pgRolesConnectionLimitsQuery)).WillReturnRows(sqlmock.NewRows([]string{"rolname", "rolconnlimit"}).
+		AddRow("postgres", 15))
 
 	ch := make(chan prometheus.Metric)
 	go func() {
 		defer close(ch)
-		c := PGReplicationCollector{}
-
+		c := PGRolesCollector{}
 		if err := c.Update(context.Background(), inst, ch); err != nil {
-			t.Errorf("Error calling PGReplicationCollector.Update: %s", err)
+			t.Errorf("Error calling PGRolesCollector.Update: %s", err)
 		}
 	}()
 
 	expected := []MetricResult{
-		{labels: labelMap{}, value: 1000, metricType: dto.MetricType_GAUGE},
-		{labels: labelMap{}, value: 1, metricType: dto.MetricType_GAUGE},
-		{labels: labelMap{}, value: 3, metricType: dto.MetricType_GAUGE},
+		{labels: labelMap{"rolname": "postgres"}, value: 15, metricType: dto.MetricType_GAUGE},
 	}
-
 	convey.Convey("Metrics comparison", t, func() {
 		for _, expect := range expected {
 			m := readMetric(<-ch)

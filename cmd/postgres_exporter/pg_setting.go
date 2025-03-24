@@ -19,7 +19,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -32,7 +31,7 @@ var (
 
 // Query the pg_settings view containing runtime variables
 func querySettings(ch chan<- prometheus.Metric, server *Server) error {
-	level.Debug(logger).Log("msg", "Querying pg_setting view", "server", server)
+	logger.Debug("Querying pg_setting view", "server", server)
 
 	// pg_settings docs: https://www.postgresql.org/docs/current/static/view-pg-settings.html
 	//
@@ -68,7 +67,7 @@ type pgSetting struct {
 func (s *pgSetting) metric(labels prometheus.Labels) prometheus.Metric {
 	var (
 		err       error
-		name      = strings.Replace(s.name, ".", "_", -1)
+		name      = strings.Replace(strings.Replace(s.name, ".", "_", -1), "-", "_", -1)
 		unit      = s.unit // nolint: ineffassign
 		shortDesc = fmt.Sprintf("Server Parameter: %s", s.name)
 		subsystem = "settings"
