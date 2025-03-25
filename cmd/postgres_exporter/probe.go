@@ -15,10 +15,9 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 	"net/http"
 
-	"github.com/go-kit/log"
-	"github.com/go-kit/log/level"
 	"github.com/prometheus-community/postgres_exporter/collector"
 	"github.com/prometheus-community/postgres_exporter/config"
 	"github.com/prometheus/client_golang/prometheus"
@@ -26,7 +25,7 @@ import (
 	"golang.org/x/sync/semaphore"
 )
 
-func handleProbe(logger log.Logger, excludeDatabases []string, connSema *semaphore.Weighted) http.HandlerFunc {
+func handleProbe(logger *slog.Logger, excludeDatabases []string, connSema *semaphore.Weighted) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		conf := c.GetConfig()
@@ -39,7 +38,7 @@ func handleProbe(logger log.Logger, excludeDatabases []string, connSema *semapho
 		var authModule config.AuthModule
 		authModuleName := params.Get("auth_module")
 		if authModuleName == "" {
-			level.Info(logger).Log("msg", "no auth_module specified, using default")
+			logger.Info("no auth_module specified, using default")
 		} else {
 			var ok bool
 			authModule, ok = conf.AuthModules[authModuleName]
@@ -55,14 +54,14 @@ func handleProbe(logger log.Logger, excludeDatabases []string, connSema *semapho
 
 		dsn, err := authModule.ConfigureTarget(target)
 		if err != nil {
-			level.Error(logger).Log("msg", "failed to configure target", "err", err)
+			logger.Error("failed to configure target", "err", err)
 			http.Error(w, fmt.Sprintf("could not configure dsn for target: %v", err), http.StatusBadRequest)
 			return
 		}
 
 		// TODO(@sysadmind): Timeout
 
-		tl := log.With(logger, "target", target)
+		tl := logger.With("target", target)
 
 		registry := prometheus.NewRegistry()
 
@@ -89,7 +88,7 @@ func handleProbe(logger log.Logger, excludeDatabases []string, connSema *semapho
 		// Run the probe
 		pc, err := collector.NewProbeCollector(ctx, tl, excludeDatabases, registry, dsn, connSema)
 		if err != nil {
-			level.Error(logger).Log("msg", "Error creating probe collector", "err", err)
+			logger.Error("Error creating probe collector", "err", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}

@@ -15,10 +15,9 @@ package collector
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 
-	"github.com/go-kit/log"
-	"github.com/go-kit/log/level"
 	"github.com/prometheus-community/postgres_exporter/config"
 	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/sync/semaphore"
@@ -27,13 +26,13 @@ import (
 type ProbeCollector struct {
 	registry   *prometheus.Registry
 	collectors map[string]Collector
-	logger     log.Logger
+	logger     *slog.Logger
 	instance   *instance
 	connSema   *semaphore.Weighted
 	ctx        context.Context
 }
 
-func NewProbeCollector(ctx context.Context, logger log.Logger, excludeDatabases []string, registry *prometheus.Registry, dsn config.DSN, connSema *semaphore.Weighted) (*ProbeCollector, error) {
+func NewProbeCollector(ctx context.Context, logger *slog.Logger, excludeDatabases []string, registry *prometheus.Registry, dsn config.DSN, connSema *semaphore.Weighted) (*ProbeCollector, error) {
 	collectors := make(map[string]Collector)
 	initiatedCollectorsMtx.Lock()
 	defer initiatedCollectorsMtx.Unlock()
@@ -50,7 +49,7 @@ func NewProbeCollector(ctx context.Context, logger log.Logger, excludeDatabases 
 		} else {
 			collector, err := factories[key](
 				collectorConfig{
-					logger:           log.With(logger, "collector", key),
+					logger:           logger.With("collector", key),
 					excludeDatabases: excludeDatabases,
 				})
 			if err != nil {
@@ -81,7 +80,7 @@ func (pc *ProbeCollector) Describe(ch chan<- *prometheus.Desc) {
 
 func (pc *ProbeCollector) Collect(ch chan<- prometheus.Metric) {
 	if err := pc.connSema.Acquire(pc.ctx, 1); err != nil {
-		level.Warn(pc.logger).Log("msg", "Failed to acquire semaphore", "err", err)
+		pc.logger.Warn("Failed to acquire semaphore", "err", err)
 		return
 	}
 	defer pc.connSema.Release(1)
@@ -89,7 +88,7 @@ func (pc *ProbeCollector) Collect(ch chan<- prometheus.Metric) {
 	// Set up the database connection for the collector.
 	err := pc.instance.setup()
 	if err != nil {
-		level.Error(pc.logger).Log("msg", "Error opening connection to database", "err", err)
+		pc.logger.Error("Error opening connection to database", "err", err)
 		return
 	}
 	defer pc.instance.Close()

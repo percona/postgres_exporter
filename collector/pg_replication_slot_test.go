@@ -17,6 +17,7 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/blang/semver/v4"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/smartystreets/goconvey/convey"
@@ -29,12 +30,12 @@ func TestPgReplicationSlotCollectorActive(t *testing.T) {
 	}
 	defer db.Close()
 
-	inst := &instance{db: db}
+	inst := &instance{db: db, version: semver.MustParse("13.3.7")}
 
-	columns := []string{"slot_name", "plugin", "slot_type", "current_wal_lsn", "confirmed_flush_lsn", "active"}
+	columns := []string{"slot_name", "plugin", "slot_type", "current_wal_lsn", "confirmed_flush_lsn", "active", "safe_wal_size", "wal_status"}
 	rows := sqlmock.NewRows(columns).
-		AddRow("test_slot", "test_decoding", "physical", 5, 3, true)
-	mock.ExpectQuery(sanitizeQuery(pgReplicationSlotQuery)).WillReturnRows(rows)
+		AddRow("test_slot", "test_decoding", "physical", 5, 3, true, 323906992, "reserved")
+	mock.ExpectQuery(sanitizeQuery(pgReplicationSlotNewQuery)).WillReturnRows(rows)
 
 	ch := make(chan prometheus.Metric)
 	go func() {
@@ -50,6 +51,8 @@ func TestPgReplicationSlotCollectorActive(t *testing.T) {
 		{labels: labelMap{"slot_name": "test_slot", "plugin": "test_decoding", "slot_type": "physical"}, value: 5, metricType: dto.MetricType_GAUGE},
 		{labels: labelMap{"slot_name": "test_slot", "plugin": "test_decoding", "slot_type": "physical"}, value: 3, metricType: dto.MetricType_GAUGE},
 		{labels: labelMap{"slot_name": "test_slot", "plugin": "test_decoding", "slot_type": "physical"}, value: 1, metricType: dto.MetricType_GAUGE},
+		{labels: labelMap{"slot_name": "test_slot", "plugin": "test_decoding", "slot_type": "physical"}, value: 323906992, metricType: dto.MetricType_GAUGE},
+		{labels: labelMap{"slot_name": "test_slot", "plugin": "test_decoding", "slot_type": "physical", "wal_status": "reserved"}, value: 1, metricType: dto.MetricType_GAUGE},
 	}
 
 	convey.Convey("Metrics comparison", t, func() {
@@ -70,12 +73,12 @@ func TestPgReplicationSlotCollectorInActive(t *testing.T) {
 	}
 	defer db.Close()
 
-	inst := &instance{db: db}
+	inst := &instance{db: db, version: semver.MustParse("13.3.7")}
 
-	columns := []string{"slot_name", "plugin", "slot_type", "current_wal_lsn", "confirmed_flush_lsn", "active"}
+	columns := []string{"slot_name", "plugin", "slot_type", "current_wal_lsn", "confirmed_flush_lsn", "active", "safe_wal_size", "wal_status"}
 	rows := sqlmock.NewRows(columns).
-		AddRow("test_slot", "test_decoding", "physical", 6, 12, false)
-	mock.ExpectQuery(sanitizeQuery(pgReplicationSlotQuery)).WillReturnRows(rows)
+		AddRow("test_slot", "test_decoding", "physical", 6, 12, false, -4000, "extended")
+	mock.ExpectQuery(sanitizeQuery(pgReplicationSlotNewQuery)).WillReturnRows(rows)
 
 	ch := make(chan prometheus.Metric)
 	go func() {
@@ -90,6 +93,8 @@ func TestPgReplicationSlotCollectorInActive(t *testing.T) {
 	expected := []MetricResult{
 		{labels: labelMap{"slot_name": "test_slot", "plugin": "test_decoding", "slot_type": "physical"}, value: 6, metricType: dto.MetricType_GAUGE},
 		{labels: labelMap{"slot_name": "test_slot", "plugin": "test_decoding", "slot_type": "physical"}, value: 0, metricType: dto.MetricType_GAUGE},
+		{labels: labelMap{"slot_name": "test_slot", "plugin": "test_decoding", "slot_type": "physical"}, value: -4000, metricType: dto.MetricType_GAUGE},
+		{labels: labelMap{"slot_name": "test_slot", "plugin": "test_decoding", "slot_type": "physical", "wal_status": "extended"}, value: 1, metricType: dto.MetricType_GAUGE},
 	}
 
 	convey.Convey("Metrics comparison", t, func() {
@@ -111,12 +116,12 @@ func TestPgReplicationSlotCollectorActiveNil(t *testing.T) {
 	}
 	defer db.Close()
 
-	inst := &instance{db: db}
+	inst := &instance{db: db, version: semver.MustParse("13.3.7")}
 
-	columns := []string{"slot_name", "plugin", "slot_type", "current_wal_lsn", "confirmed_flush_lsn", "active"}
+	columns := []string{"slot_name", "plugin", "slot_type", "current_wal_lsn", "confirmed_flush_lsn", "active", "safe_wal_size", "wal_status"}
 	rows := sqlmock.NewRows(columns).
-		AddRow("test_slot", "test_decoding", "physical", 6, 12, nil)
-	mock.ExpectQuery(sanitizeQuery(pgReplicationSlotQuery)).WillReturnRows(rows)
+		AddRow("test_slot", "test_decoding", "physical", 6, 12, nil, nil, "lost")
+	mock.ExpectQuery(sanitizeQuery(pgReplicationSlotNewQuery)).WillReturnRows(rows)
 
 	ch := make(chan prometheus.Metric)
 	go func() {
@@ -131,6 +136,7 @@ func TestPgReplicationSlotCollectorActiveNil(t *testing.T) {
 	expected := []MetricResult{
 		{labels: labelMap{"slot_name": "test_slot", "plugin": "test_decoding", "slot_type": "physical"}, value: 6, metricType: dto.MetricType_GAUGE},
 		{labels: labelMap{"slot_name": "test_slot", "plugin": "test_decoding", "slot_type": "physical"}, value: 0, metricType: dto.MetricType_GAUGE},
+		{labels: labelMap{"slot_name": "test_slot", "plugin": "test_decoding", "slot_type": "physical", "wal_status": "lost"}, value: 1, metricType: dto.MetricType_GAUGE},
 	}
 
 	convey.Convey("Metrics comparison", t, func() {
@@ -151,12 +157,12 @@ func TestPgReplicationSlotCollectorTestNilValues(t *testing.T) {
 	}
 	defer db.Close()
 
-	inst := &instance{db: db}
+	inst := &instance{db: db, version: semver.MustParse("13.3.7")}
 
-	columns := []string{"slot_name", "plugin", "slot_type", "current_wal_lsn", "confirmed_flush_lsn", "active"}
+	columns := []string{"slot_name", "plugin", "slot_type", "current_wal_lsn", "confirmed_flush_lsn", "active", "safe_wal_size", "wal_status"}
 	rows := sqlmock.NewRows(columns).
-		AddRow(nil, nil, nil, nil, nil, true)
-	mock.ExpectQuery(sanitizeQuery(pgReplicationSlotQuery)).WillReturnRows(rows)
+		AddRow(nil, nil, nil, nil, nil, true, nil, nil)
+	mock.ExpectQuery(sanitizeQuery(pgReplicationSlotNewQuery)).WillReturnRows(rows)
 
 	ch := make(chan prometheus.Metric)
 	go func() {

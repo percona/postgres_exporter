@@ -19,7 +19,6 @@ import (
 	"fmt"
 
 	"github.com/blang/semver/v4"
-	"github.com/go-kit/log/level"
 	"gopkg.in/yaml.v2"
 )
 
@@ -65,9 +64,9 @@ var queryOverrides = map[string][]OverrideQuery{
 			semver.MustParseRange(">=10.0.0"),
 			`
 			SELECT *,
-				(case pg_is_in_recovery() when 't' then null else pg_current_wal_lsn() end) AS pg_current_wal_lsn,
-				(case pg_is_in_recovery() when 't' then null else pg_wal_lsn_diff(pg_current_wal_lsn(), pg_lsn('0/0'))::float end) AS pg_current_wal_lsn_bytes,
-				(case pg_is_in_recovery() when 't' then null else pg_wal_lsn_diff(pg_current_wal_lsn(), replay_lsn)::float end) AS pg_wal_lsn_diff
+				(case pg_is_in_recovery() when 't' then pg_last_wal_receive_lsn() else pg_current_wal_lsn() end) AS pg_current_wal_lsn,
+				(case pg_is_in_recovery() when 't' then pg_wal_lsn_diff(pg_last_wal_receive_lsn(), pg_lsn('0/0'))::float else pg_wal_lsn_diff(pg_current_wal_lsn(), pg_lsn('0/0'))::float end) AS pg_current_wal_lsn_bytes,
+				(case pg_is_in_recovery() when 't' then pg_wal_lsn_diff(pg_last_wal_receive_lsn(), replay_lsn)::float else pg_wal_lsn_diff(pg_current_wal_lsn(), replay_lsn)::float end) AS pg_wal_lsn_diff
 			FROM pg_stat_replication
 			`,
 		},
@@ -75,8 +74,8 @@ var queryOverrides = map[string][]OverrideQuery{
 			semver.MustParseRange(">=9.2.0 <10.0.0"),
 			`
 			SELECT *,
-				(case pg_is_in_recovery() when 't' then null else pg_current_xlog_location() end) AS pg_current_xlog_location,
-				(case pg_is_in_recovery() when 't' then null else pg_xlog_location_diff(pg_current_xlog_location(), replay_location)::float end) AS pg_xlog_location_diff
+				(case pg_is_in_recovery() when 't' then pg_last_xlog_receive_location() else pg_current_xlog_location() end) AS pg_current_xlog_location,
+				(case pg_is_in_recovery() when 't' then pg_xlog_location_diff(pg_last_xlog_receive_location(), replay_location)::float else pg_xlog_location_diff(pg_current_xlog_location(), replay_location)::float end) AS pg_xlog_location_diff
 			FROM pg_stat_replication
 			`,
 		},
@@ -84,7 +83,7 @@ var queryOverrides = map[string][]OverrideQuery{
 			semver.MustParseRange("<9.2.0"),
 			`
 			SELECT *,
-				(case pg_is_in_recovery() when 't' then null else pg_current_xlog_location() end) AS pg_current_xlog_location
+				(case pg_is_in_recovery() when 't' then pg_last_xlog_receive_location() else pg_current_xlog_location() end) AS pg_current_xlog_location
 			FROM pg_stat_replication
 			`,
 		},
@@ -94,7 +93,8 @@ var queryOverrides = map[string][]OverrideQuery{
 		{
 			semver.MustParseRange(">=9.4.0 <10.0.0"),
 			`
-			SELECT slot_name, database, active, pg_xlog_location_diff(pg_current_xlog_location(), restart_lsn)
+			SELECT slot_name, database, active,
+				(case pg_is_in_recovery() when 't' then pg_xlog_location_diff(pg_last_xlog_receive_location(), restart_lsn) else pg_xlog_location_diff(pg_current_xlog_location(), restart_lsn) end) as pg_xlog_location_diff
 			FROM pg_replication_slots
                         WHERE pg_is_in_recovery() = False
 			`,
@@ -102,7 +102,8 @@ var queryOverrides = map[string][]OverrideQuery{
 		{
 			semver.MustParseRange(">=10.0.0"),
 			`
-			SELECT slot_name, database, active, pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn)
+			SELECT slot_name, database, active,
+				(case pg_is_in_recovery() when 't' then pg_wal_lsn_diff(pg_last_wal_receive_lsn(), restart_lsn) else pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn) end) as pg_wal_lsn_diff
 			FROM pg_replication_slots
                         WHERE pg_is_in_recovery() = False
 			`,
@@ -130,6 +131,9 @@ var queryOverrides = map[string][]OverrideQuery{
 				tmp.state,
 				tmp2.usename,
 				tmp2.application_name,
+				tmp2.backend_type,
+				tmp2.wait_event_type,
+				tmp2.wait_event,
 				COALESCE(count,0) as count,
 				COALESCE(max_tx_duration,0) as max_tx_duration
 			FROM
@@ -148,9 +152,13 @@ var queryOverrides = map[string][]OverrideQuery{
 					state,
 					usename,
 					application_name,
+					backend_type,
+					wait_event_type,
+					wait_event,
 					count(*) AS count,
 					MAX(EXTRACT(EPOCH FROM now() - xact_start))::float AS max_tx_duration
-				FROM pg_stat_activity GROUP BY datname,state,usename,application_name) AS tmp2
+				FROM pg_stat_activity
+				GROUP BY datname,state,usename,application_name,backend_type,wait_event_type,wait_event) AS tmp2
 				ON tmp.state = tmp2.state AND pg_database.datname = tmp2.datname
 			`,
 		},
@@ -186,7 +194,7 @@ func makeQueryOverrideMap(pgVersion semver.Version, queryOverrides map[string][]
 			}
 		}
 		if !matched {
-			level.Warn(logger).Log("msg", "No query matched override, disabling metric space", "name", name)
+			logger.Warn("No query matched override, disabling metric space", "name", name)
 			resultMap[name] = ""
 		}
 	}
@@ -207,7 +215,7 @@ func parseUserQueries(content []byte) (map[string]intermediateMetricMap, map[str
 	newQueryOverrides := make(map[string]string)
 
 	for metric, specs := range userQueries {
-		level.Debug(logger).Log("msg", "New user metric namespace from YAML metric", "metric", metric, "cache_seconds", specs.CacheSeconds)
+		logger.Debug("New user metric namespace from YAML metric", "metric", metric, "cache_seconds", specs.CacheSeconds)
 		newQueryOverrides[metric] = specs.Query
 		metricMap, ok := metricMaps[metric]
 		if !ok {
@@ -259,9 +267,9 @@ func addQueries(content []byte, pgVersion semver.Version, server *Server) error 
 	for k, v := range partialExporterMap {
 		_, found := server.metricMap[k]
 		if found {
-			level.Debug(logger).Log("msg", "Overriding metric from user YAML file", "metric", k)
+			logger.Debug("Overriding metric from user YAML file", "metric", k)
 		} else {
-			level.Debug(logger).Log("msg", "Adding new metric from user YAML file", "metric", k)
+			logger.Debug("Adding new metric from user YAML file", "metric", k)
 		}
 		server.metricMap[k] = v
 	}
@@ -270,9 +278,9 @@ func addQueries(content []byte, pgVersion semver.Version, server *Server) error 
 	for k, v := range newQueryOverrides {
 		_, found := server.queryOverrides[k]
 		if found {
-			level.Debug(logger).Log("msg", "Overriding query override from user YAML file", "query_override", k)
+			logger.Debug("Overriding query override from user YAML file", "query_override", k)
 		} else {
-			level.Debug(logger).Log("msg", "Adding new query override from user YAML file", "query_override", k)
+			logger.Debug("Adding new query override from user YAML file", "query_override", k)
 		}
 		server.queryOverrides[k] = v
 	}
