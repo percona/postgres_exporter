@@ -80,7 +80,7 @@ var (
 			"wal_status",
 		),
 		"availability of WAL files claimed by this slot",
-		[]string{"slot_name", "slot_type", "wal_status"}, nil,
+		[]string{"slot_name", "plugin", "slot_type", "wal_status"}, nil,
 	)
 	pgReplicationSlotQuery = `SELECT
 		slot_name,
@@ -197,14 +197,14 @@ func (PGReplicationSlotCollector) Update(ctx context.Context, instance *instance
 		if safeWalSize.Valid {
 			ch <- prometheus.MustNewConstMetric(
 				pgReplicationSlotSafeWal,
-				prometheus.GaugeValue, float64(safeWalSize.Int64), slotNameLabel, slotTypeLabel,
+				prometheus.GaugeValue, float64(safeWalSize.Int64), slotNameLabel, pluginLabel, slotTypeLabel,
 			)
 		}
 
 		if walStatus.Valid {
 			ch <- prometheus.MustNewConstMetric(
 				pgReplicationSlotWalStatus,
-				prometheus.GaugeValue, 1, slotNameLabel, slotTypeLabel, walStatus.String,
+				prometheus.GaugeValue, 1, slotNameLabel, pluginLabel, slotTypeLabel, walStatus.String,
 			)
 		}
 	}
