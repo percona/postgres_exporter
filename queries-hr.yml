@@ -73,7 +73,7 @@ pg_custom_stat_wal_receiver:
 
 pg_custom_database_size_custom:
   query: "SELECT pg_database.datname, pg_database_size(pg_database.datname) as bytes FROM pg_database"
-  master: true
+  master: false
   cache_seconds: 30
   metrics:
     - datname:
