@@ -97,7 +97,7 @@ func TestPGStatUserTablesCollector(t *testing.T) {
 			13,
 			14,
 			15)
-	mock.ExpectQuery(sanitizeQuery(statUserTablesQuery)).WillReturnRows(rows)
+	mock.ExpectQuery(sanitizeQuery(statUserTablesQueryPre18)).WillReturnRows(rows)
 	ch := make(chan prometheus.Metric)
 	go func() {
 		defer close(ch)
@@ -198,7 +198,7 @@ func TestPGStatUserTablesCollectorNullValues(t *testing.T) {
 			nil,
 			nil,
 			nil)
-	mock.ExpectQuery(sanitizeQuery(statUserTablesQuery)).WillReturnRows(rows)
+	mock.ExpectQuery(sanitizeQuery(statUserTablesQueryPre18)).WillReturnRows(rows)
 	ch := make(chan prometheus.Metric)
 	go func() {
 		defer close(ch)

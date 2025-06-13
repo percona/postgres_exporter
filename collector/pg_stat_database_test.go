@@ -82,7 +82,7 @@ func TestPGStatDatabaseCollector(t *testing.T) {
 			823,
 			srT)
 
-	mock.ExpectQuery(sanitizeQuery(statDatabaseQuery)).WillReturnRows(rows)
+	mock.ExpectQuery(sanitizeQuery(statDatabaseQueryPre18)).WillReturnRows(rows)
 
 	ch := make(chan prometheus.Metric)
 	go func() {
@@ -203,7 +203,7 @@ func TestPGStatDatabaseCollectorNullValues(t *testing.T) {
 			16,
 			823,
 			srT)
-	mock.ExpectQuery(sanitizeQuery(statDatabaseQuery)).WillReturnRows(rows)
+	mock.ExpectQuery(sanitizeQuery(statDatabaseQueryPre18)).WillReturnRows(rows)
 
 	ch := make(chan prometheus.Metric)
 	go func() {
@@ -345,7 +345,7 @@ func TestPGStatDatabaseCollectorRowLeakTest(t *testing.T) {
 			17,
 			824,
 			srT)
-	mock.ExpectQuery(sanitizeQuery(statDatabaseQuery)).WillReturnRows(rows)
+	mock.ExpectQuery(sanitizeQuery(statDatabaseQueryPre18)).WillReturnRows(rows)
 
 	ch := make(chan prometheus.Metric)
 	go func() {
@@ -460,7 +460,7 @@ func TestPGStatDatabaseCollectorTestNilStatReset(t *testing.T) {
 			823,
 			nil)
 
-	mock.ExpectQuery(sanitizeQuery(statDatabaseQuery)).WillReturnRows(rows)
+	mock.ExpectQuery(sanitizeQuery(statDatabaseQueryPre18)).WillReturnRows(rows)
 
 	ch := make(chan prometheus.Metric)
 	go func() {
