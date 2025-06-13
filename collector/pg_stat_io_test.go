@@ -34,7 +34,7 @@ func TestPGStatIOCollector(t *testing.T) {
 	columns := []string{"backend_type", "io_context", "io_object", "reads", "read_time", "writes", "write_time", "extends", "read_bytes", "write_bytes", "extend_bytes"}
 	rows := sqlmock.NewRows(columns).
 		AddRow("client backend", "normal", "relation", 100, 50.5, 75, 25.2, 10, nil, nil, nil)
-	mock.ExpectQuery("SELECT.*FROM pg_stat_io").WillReturnRows(rows)
+	mock.ExpectQuery("SELECT.*backend_type.*FROM pg_stat_io").WillReturnRows(rows)
 
 	ch := make(chan prometheus.Metric)
 	go func() {
@@ -47,9 +47,6 @@ func TestPGStatIOCollector(t *testing.T) {
 	}()
 
 	expected := 5 // reads, read_time, writes, write_time, extends (no byte metrics for v16)
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Errorf("There were unfulfilled expectations: %s", err)
-	}
 
 	metricCount := 0
 	for m := range ch {
@@ -59,6 +56,10 @@ func TestPGStatIOCollector(t *testing.T) {
 
 	if metricCount != expected {
 		t.Errorf("Expected %d metrics, got %d", expected, metricCount)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("There were unfulfilled expectations: %s", err)
 	}
 }
 
@@ -74,7 +75,7 @@ func TestPGStatIOCollectorPostgreSQL18(t *testing.T) {
 	columns := []string{"backend_type", "io_context", "io_object", "reads", "read_time", "writes", "write_time", "extends", "read_bytes", "write_bytes", "extend_bytes"}
 	rows := sqlmock.NewRows(columns).
 		AddRow("client backend", "normal", "relation", 100, 50.5, 75, 25.2, 10, 1024, 2048, 512)
-	mock.ExpectQuery("SELECT.*FROM pg_stat_io").WillReturnRows(rows)
+	mock.ExpectQuery("SELECT.*backend_type.*FROM pg_stat_io").WillReturnRows(rows)
 
 	ch := make(chan prometheus.Metric)
 	go func() {
@@ -87,9 +88,6 @@ func TestPGStatIOCollectorPostgreSQL18(t *testing.T) {
 	}()
 
 	expected := 8 // reads, read_time, writes, write_time, extends, read_bytes, write_bytes, extend_bytes
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Errorf("There were unfulfilled expectations: %s", err)
-	}
 
 	metricCount := 0
 	for m := range ch {
@@ -99,6 +97,10 @@ func TestPGStatIOCollectorPostgreSQL18(t *testing.T) {
 
 	if metricCount != expected {
 		t.Errorf("Expected %d metrics, got %d", expected, metricCount)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("There were unfulfilled expectations: %s", err)
 	}
 }
 
