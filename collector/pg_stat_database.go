@@ -17,6 +17,7 @@ import (
 	"context"
 	"database/sql"
 
+	"github.com/blang/semver/v4"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
@@ -206,8 +207,26 @@ var (
 		[]string{"datid", "datname"},
 		prometheus.Labels{},
 	)
+	statDatabaseParallelWorkersToLaunch = prometheus.NewDesc(prometheus.BuildFQName(
+		namespace,
+		statDatabaseSubsystem,
+		"parallel_workers_to_launch",
+	),
+		"Number of parallel workers to launch (PostgreSQL 18+)",
+		[]string{"datid", "datname"},
+		prometheus.Labels{},
+	)
+	statDatabaseParallelWorkersLaunched = prometheus.NewDesc(prometheus.BuildFQName(
+		namespace,
+		statDatabaseSubsystem,
+		"parallel_workers_launched",
+	),
+		"Number of parallel workers launched (PostgreSQL 18+)",
+		[]string{"datid", "datname"},
+		prometheus.Labels{},
+	)
 
-	statDatabaseQuery = `
+	statDatabaseQueryPre18 = `
 		SELECT
 			datid
 			,datname
@@ -228,15 +247,48 @@ var (
 			,blk_read_time
 			,blk_write_time
 			,stats_reset
+			,NULL::bigint as parallel_workers_to_launch
+			,NULL::bigint as parallel_workers_launched
+		FROM pg_stat_database;
+	`
+
+	statDatabaseQuery18Plus = `
+		SELECT
+			datid
+			,datname
+			,numbackends
+			,xact_commit
+			,xact_rollback
+			,blks_read
+			,blks_hit
+			,tup_returned
+			,tup_fetched
+			,tup_inserted
+			,tup_updated
+			,tup_deleted
+			,conflicts
+			,temp_files
+			,temp_bytes
+			,deadlocks
+			,blk_read_time
+			,blk_write_time
+			,stats_reset
+			,parallel_workers_to_launch
+			,parallel_workers_launched
 		FROM pg_stat_database;
 	`
 )
 
 func (c *PGStatDatabaseCollector) Update(ctx context.Context, instance *instance, ch chan<- prometheus.Metric) error {
 	db := instance.getDB()
-	rows, err := db.QueryContext(ctx,
-		statDatabaseQuery,
-	)
+
+	// Use version-specific query for PostgreSQL 18+
+	query := statDatabaseQueryPre18
+	if instance.version.GTE(semver.Version{Major: 18}) {
+		query = statDatabaseQuery18Plus
+	}
+
+	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
 		return err
 	}
@@ -246,6 +298,7 @@ func (c *PGStatDatabaseCollector) Update(ctx context.Context, instance *instance
 		var datid, datname sql.NullString
 		var numBackends, xactCommit, xactRollback, blksRead, blksHit, tupReturned, tupFetched, tupInserted, tupUpdated, tupDeleted, conflicts, tempFiles, tempBytes, deadlocks, blkReadTime, blkWriteTime sql.NullFloat64
 		var statsReset sql.NullTime
+		var parallelWorkersToLaunch, parallelWorkersLaunched sql.NullFloat64
 
 		err := rows.Scan(
 			&datid,
@@ -267,6 +320,8 @@ func (c *PGStatDatabaseCollector) Update(ctx context.Context, instance *instance
 			&blkReadTime,
 			&blkWriteTime,
 			&statsReset,
+			&parallelWorkersToLaunch,
+			&parallelWorkersLaunched,
 		)
 		if err != nil {
 			return err
@@ -473,6 +528,25 @@ func (c *PGStatDatabaseCollector) Update(ctx context.Context, instance *instance
 			statsResetMetric,
 			labels...,
 		)
+
+		// PostgreSQL 18+ parallel worker metrics
+		if parallelWorkersToLaunch.Valid {
+			ch <- prometheus.MustNewConstMetric(
+				statDatabaseParallelWorkersToLaunch,
+				prometheus.CounterValue,
+				parallelWorkersToLaunch.Float64,
+				labels...,
+			)
+		}
+
+		if parallelWorkersLaunched.Valid {
+			ch <- prometheus.MustNewConstMetric(
+				statDatabaseParallelWorkersLaunched,
+				prometheus.CounterValue,
+				parallelWorkersLaunched.Float64,
+				labels...,
+			)
+		}
 	}
 	return nil
 }
