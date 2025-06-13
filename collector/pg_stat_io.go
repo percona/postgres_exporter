@@ -87,7 +87,7 @@ var (
 	)
 
 	// PostgreSQL 18+ query with byte statistics and WAL I/O
-	statIOQuery18Plus = `
+	StatIOQuery18Plus = `
 		SELECT
 			backend_type,
 			io_context,
@@ -104,7 +104,7 @@ var (
 	`
 
 	// Pre-PostgreSQL 18 query without byte statistics
-	statIOQueryPre18 = `
+	StatIOQueryPre18 = `
 		SELECT
 			backend_type,
 			io_context,
@@ -130,9 +130,9 @@ func (c *PGStatIOCollector) Update(ctx context.Context, instance *instance, ch c
 	db := instance.getDB()
 
 	// Use version-specific query for PostgreSQL 18+
-	query := statIOQueryPre18
+	query := StatIOQueryPre18
 	if instance.version.GTE(semver.Version{Major: 18}) {
-		query = statIOQuery18Plus
+		query = StatIOQuery18Plus
 	}
 
 	rows, err := db.QueryContext(ctx, query)
