@@ -226,6 +226,9 @@ func queryNamespaceMappings(ch chan<- prometheus.Metric, server *Server) map[str
 		var err error
 		if scrapeMetric {
 			metrics, nonFatalErrors, err = queryNamespaceMapping(server, namespace, mapping)
+
+			// Create execution tracking metric for custom queries
+			createQueryExecutionMetric(ch, server, namespace, err)
 		} else {
 			metrics = cachedMetric.metrics
 		}

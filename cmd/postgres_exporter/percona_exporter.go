@@ -264,3 +264,44 @@ func (e *Exporter) addCustomQueriesFromFile(path string, version semver.Version,
 	// Mark user queries as successfully loaded
 	e.userQueriesError.WithLabelValues(path, hashsumStr).Set(0)
 }
+
+// createQueryExecutionMetric creates a metric to track custom query execution success/failure.
+// It generates a pg_exporter_user_queries_executed_total metric with value 1 for success, 0 for failure.
+func createQueryExecutionMetric(ch chan<- prometheus.Metric, server *Server, namespace string, queryErr error) {
+	// Extract database name from server labels or use a default
+	dbName := server.GetDBName()
+
+	// Prepare variable label names and values
+	labelNames := []string{"query_name", "database"}
+	labelValues := []string{namespace, dbName}
+
+	// Add server labels as variable labels
+	if server.labels != nil {
+		for key, value := range server.labels {
+			labelNames = append(labelNames, key)
+			labelValues = append(labelValues, value)
+		}
+	}
+
+	// Create a metric to track custom query execution
+	executionDesc := prometheus.NewDesc(
+		"pg_exporter_user_queries_executed_total",
+		"Total number of times custom queries were executed (1 for success, 0 for failure).",
+		labelNames,
+		nil, // No constant labels
+	)
+
+	// Value is 1 for success, 0 for failure
+	executionValue := float64(0)
+	if queryErr == nil {
+		executionValue = 1
+	}
+
+	executionMetric := prometheus.MustNewConstMetric(
+		executionDesc,
+		prometheus.CounterValue,
+		executionValue,
+		labelValues...,
+	)
+	ch <- executionMetric
+}
