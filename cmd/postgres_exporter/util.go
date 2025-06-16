@@ -182,7 +182,7 @@ func parseDSN(url string) (map[string]string, error) {
 	for _, pair := range pairs {
 		splitted := strings.SplitN(pair, "=", 2)
 		if len(splitted) != 2 {
-			return nil, fmt.Errorf("malformed dsn %q", dsn)
+			return nil, fmt.Errorf("malformed dsn %q", loggableDSN(dsn))
 		}
 		// Newer versions of pq.ParseURL quote values so trim them off if they exist
 		key := strings.Trim(splitted[0], "'\"")
