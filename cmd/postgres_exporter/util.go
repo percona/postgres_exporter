@@ -171,7 +171,7 @@ func dbToString(t interface{}) (string, bool) {
 	}
 }
 
-func parseFingerprint(url string) (string, error) {
+func parseDSN(url string) (map[string]string, error) {
 	dsn, err := pq.ParseURL(url)
 	if err != nil {
 		dsn = url
@@ -182,12 +182,20 @@ func parseFingerprint(url string) (string, error) {
 	for _, pair := range pairs {
 		splitted := strings.SplitN(pair, "=", 2)
 		if len(splitted) != 2 {
-			return "", fmt.Errorf("malformed dsn %q", dsn)
+			return nil, fmt.Errorf("malformed dsn %q", dsn)
 		}
 		// Newer versions of pq.ParseURL quote values so trim them off if they exist
 		key := strings.Trim(splitted[0], "'\"")
 		value := strings.Trim(splitted[1], "'\"")
 		kv[key] = value
+	}
+	return kv, nil
+}
+
+func parseFingerprint(url string) (string, error) {
+	kv, err := parseDSN(url)
+	if err != nil {
+		return "", err
 	}
 
 	var fingerprint string
@@ -205,6 +213,20 @@ func parseFingerprint(url string) (string, error) {
 	}
 
 	return fingerprint, nil
+}
+
+func parseDatabaseName(url string) (string, error) {
+	kv, err := parseDSN(url)
+	if err != nil {
+		return "", err
+	}
+
+	if dbname, ok := kv["dbname"]; ok {
+		return dbname, nil
+	}
+
+	// Default database name if not specified
+	return "postgres", nil
 }
 
 func loggableDSN(dsn string) string {

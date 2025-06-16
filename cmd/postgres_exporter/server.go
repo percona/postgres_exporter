@@ -43,6 +43,8 @@ type Server struct {
 	// Currently cached metrics
 	metricCache map[string]cachedMetrics
 	cacheMtx    sync.Mutex
+
+	dbname string
 }
 
 // ServerOpt configures a server.
@@ -65,6 +67,11 @@ func NewServer(dsn string, opts ...ServerOpt) (*Server, error) {
 		return nil, err
 	}
 
+	dbname, err := parseDatabaseName(dsn)
+	if err != nil {
+		return nil, err
+	}
+
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
 		return nil, err
@@ -72,10 +79,11 @@ func NewServer(dsn string, opts ...ServerOpt) (*Server, error) {
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 
-	level.Info(logger).Log("msg", "Established new database connection", "fingerprint", fingerprint)
+	level.Info(logger).Log("msg", "Established new database connection", "fingerprint", fingerprint, "database", dbname)
 
 	s := &Server{
 		db:     db,
+		dbname: dbname,
 		master: false,
 		labels: prometheus.Labels{
 			serverLabelName: fingerprint,
@@ -109,6 +117,11 @@ func (s *Server) Ping() error {
 // String returns server's fingerprint.
 func (s *Server) String() string {
 	return s.labels[serverLabelName]
+}
+
+// GetDBName returns database name.
+func (s *Server) GetDBName() string {
+	return s.dbname
 }
 
 // Scrape loads metrics.

@@ -73,6 +73,8 @@ const (
 	staticLabelName = "static"
 	// Metric label used for server identification.
 	serverLabelName = "server"
+	// Metric label used for database identification.
+	databaseLabelName = "database"
 )
 
 func main() {
