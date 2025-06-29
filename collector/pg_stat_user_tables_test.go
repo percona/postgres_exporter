@@ -72,7 +72,12 @@ func TestPGStatUserTablesCollector(t *testing.T) {
 		"autovacuum_count",
 		"analyze_count",
 		"autoanalyze_count",
-		"total_size"}
+		"total_size",
+		"total_vacuum_time",
+		"total_autovacuum_time",
+		"total_analyze_time",
+		"total_autoanalyze_time",
+	}
 	rows := sqlmock.NewRows(columns).
 		AddRow("postgres",
 			"public",
@@ -96,8 +101,13 @@ func TestPGStatUserTablesCollector(t *testing.T) {
 			12,
 			13,
 			14,
-			15)
-	mock.ExpectQuery(sanitizeQuery(statUserTablesQuery)).WillReturnRows(rows)
+			15,
+			nil,
+			nil,
+			nil,
+			nil,
+		)
+	mock.ExpectQuery(sanitizeQuery(statUserTablesQueryPre18)).WillReturnRows(rows)
 	ch := make(chan prometheus.Metric)
 	go func() {
 		defer close(ch)
@@ -173,7 +183,12 @@ func TestPGStatUserTablesCollectorNullValues(t *testing.T) {
 		"autovacuum_count",
 		"analyze_count",
 		"autoanalyze_count",
-		"total_size"}
+		"total_size",
+		"total_vacuum_time",
+		"total_autovacuum_time",
+		"total_analyze_time",
+		"total_autoanalyze_time",
+	}
 	rows := sqlmock.NewRows(columns).
 		AddRow("postgres",
 			nil,
@@ -197,8 +212,13 @@ func TestPGStatUserTablesCollectorNullValues(t *testing.T) {
 			nil,
 			nil,
 			nil,
-			nil)
-	mock.ExpectQuery(sanitizeQuery(statUserTablesQuery)).WillReturnRows(rows)
+			nil,
+			nil,
+			nil,
+			nil,
+			nil,
+		)
+	mock.ExpectQuery(sanitizeQuery(statUserTablesQueryPre18)).WillReturnRows(rows)
 	ch := make(chan prometheus.Metric)
 	go func() {
 		defer close(ch)
