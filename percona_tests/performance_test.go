@@ -3,7 +3,7 @@ package percona_tests
 import (
 	"flag"
 	"fmt"
-	"io/ioutil"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -47,11 +47,11 @@ func TestPerformance(t *testing.T) {
 
 	var updated, original *StatsData
 	t.Run("upstream exporter", func(t *testing.T) {
-		updated = doTestStats(t, repeatCount, scrapesCount, updatedExporterFileName)
+		updated = doTestStats(t, repeatCount, scrapesCount, updatedExporterFileName, updatedExporterArgs)
 	})
 
 	t.Run("percona exporter", func(t *testing.T) {
-		original = doTestStats(t, repeatCount, scrapesCount, oldExporterFileName)
+		original = doTestStats(t, repeatCount, scrapesCount, oldExporterFileName, oldExporterArgs)
 	})
 
 	printStats(original, updated)
@@ -65,13 +65,13 @@ func calculatePerc(base, updated float64) float64 {
 	return diffPerc
 }
 
-func doTestStats(t *testing.T, cnt int, size int, fileName string) *StatsData {
+func doTestStats(t *testing.T, cnt, size int, fileName, argsFile string) *StatsData {
 	var durations []float64
 	var hwms []float64
 	var datas []float64
 
 	for i := 0; i < cnt; i++ {
-		d, hwm, data, err := doTest(size, fileName)
+		d, hwm, data, err := doTest(size, fileName, argsFile)
 		if !assert.NoError(t, err) {
 			return nil
 		}
@@ -124,8 +124,8 @@ func doTestStats(t *testing.T, cnt int, size int, fileName string) *StatsData {
 	return &st
 }
 
-func doTest(iterations int, fileName string) (cpu, hwm, data int64, _ error) {
-	cmd, port, collectOutput, err := launchExporter(fileName)
+func doTest(iterations int, fileName, argsFile string) (cpu, hwm, data int64, _ error) {
+	cmd, port, collectOutput, err := launchExporter(fileName, argsFile)
 	if err != nil {
 		return 0, 0, 0, err
 	}
@@ -154,7 +154,7 @@ func doTest(iterations int, fileName string) (cpu, hwm, data int64, _ error) {
 }
 
 func getCPUMem(pid int) (hwm, data int64) {
-	contents, err := ioutil.ReadFile(fmt.Sprintf("/proc/%d/status", pid))
+	contents, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", pid))
 	if err != nil {
 		return 0, 0
 	}
@@ -178,7 +178,7 @@ func getCPUMem(pid int) (hwm, data int64) {
 }
 
 func getCPUTime(pid int) (total int64) {
-	contents, err := ioutil.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	contents, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
 	if err != nil {
 		return
 	}

@@ -15,92 +15,93 @@ package collector
 
 import (
 	"context"
-	"time"
-
-	"github.com/go-kit/log"
+	"database/sql"
+	"github.com/blang/semver/v4"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
+const bgWriterSubsystem = "stat_bgwriter"
+
 func init() {
-	registerCollector("bgwriter", defaultEnabled, NewPGStatBGWriterCollector)
+	registerCollector(bgWriterSubsystem, defaultEnabled, NewPGStatBGWriterCollector)
 }
 
 type PGStatBGWriterCollector struct {
 }
 
-func NewPGStatBGWriterCollector(logger log.Logger) (Collector, error) {
+func NewPGStatBGWriterCollector(collectorConfig) (Collector, error) {
 	return &PGStatBGWriterCollector{}, nil
 }
 
-const bgWriterSubsystem = "stat_bgwriter"
-
-var statBGWriter = map[string]*prometheus.Desc{
-	"checkpoints_timed": prometheus.NewDesc(
+var (
+	statBGWriterCheckpointsTimedDesc = prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, bgWriterSubsystem, "checkpoints_timed_total"),
 		"Number of scheduled checkpoints that have been performed",
 		[]string{"collector", "server"},
 		prometheus.Labels{},
-	),
-	"checkpoints_req": prometheus.NewDesc(
+	)
+	statBGWriterCheckpointsReqDesc = prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, bgWriterSubsystem, "checkpoints_req_total"),
 		"Number of requested checkpoints that have been performed",
 		[]string{"collector", "server"},
 		prometheus.Labels{},
-	),
-	"checkpoint_write_time": prometheus.NewDesc(
+	)
+	statBGWriterCheckpointsReqTimeDesc = prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, bgWriterSubsystem, "checkpoint_write_time_total"),
 		"Total amount of time that has been spent in the portion of checkpoint processing where files are written to disk, in milliseconds",
 		[]string{"collector", "server"},
 		prometheus.Labels{},
-	),
-	"checkpoint_sync_time": prometheus.NewDesc(
+	)
+	statBGWriterCheckpointsSyncTimeDesc = prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, bgWriterSubsystem, "checkpoint_sync_time_total"),
 		"Total amount of time that has been spent in the portion of checkpoint processing where files are synchronized to disk, in milliseconds",
 		[]string{"collector", "server"},
 		prometheus.Labels{},
-	),
-	"buffers_checkpoint": prometheus.NewDesc(
+	)
+	statBGWriterBuffersCheckpointDesc = prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, bgWriterSubsystem, "buffers_checkpoint_total"),
 		"Number of buffers written during checkpoints",
 		[]string{"collector", "server"},
 		prometheus.Labels{},
-	),
-	"buffers_clean": prometheus.NewDesc(
+	)
+	statBGWriterBuffersCleanDesc = prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, bgWriterSubsystem, "buffers_clean_total"),
 		"Number of buffers written by the background writer",
 		[]string{"collector", "server"},
 		prometheus.Labels{},
-	),
-	"maxwritten_clean": prometheus.NewDesc(
+	)
+	statBGWriterMaxwrittenCleanDesc = prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, bgWriterSubsystem, "maxwritten_clean_total"),
 		"Number of times the background writer stopped a cleaning scan because it had written too many buffers",
 		[]string{"collector", "server"},
 		prometheus.Labels{},
-	),
-	"buffers_backend": prometheus.NewDesc(
+	)
+	statBGWriterBuffersBackendDesc = prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, bgWriterSubsystem, "buffers_backend_total"),
 		"Number of buffers written directly by a backend",
 		[]string{"collector", "server"},
 		prometheus.Labels{},
-	),
-	"buffers_backend_fsync": prometheus.NewDesc(
+	)
+	statBGWriterBuffersBackendFsyncDesc = prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, bgWriterSubsystem, "buffers_backend_fsync_total"),
 		"Number of times a backend had to execute its own fsync call (normally the background writer handles those even when the backend does its own write)",
 		[]string{"collector", "server"},
 		prometheus.Labels{},
-	),
-	"buffers_alloc": prometheus.NewDesc(
+	)
+	statBGWriterBuffersAllocDesc = prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, bgWriterSubsystem, "buffers_alloc_total"),
 		"Number of buffers allocated",
 		[]string{"collector", "server"},
 		prometheus.Labels{},
-	),
-	"stats_reset": prometheus.NewDesc(
+	)
+	statBGWriterStatsResetDesc = prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, bgWriterSubsystem, "stats_reset_total"),
 		"Time at which these statistics were last reset",
 		[]string{"collector", "server"},
 		prometheus.Labels{},
-	),
+	)
+)
+var statBGWriter = map[string]*prometheus.Desc{
 	"percona_checkpoints_timed": prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, bgWriterSubsystem, "checkpoints_timed"),
 		"Number of scheduled checkpoints that have been performed",
@@ -169,199 +170,271 @@ var statBGWriter = map[string]*prometheus.Desc{
 	),
 }
 
-func (PGStatBGWriterCollector) Update(ctx context.Context, server *server, ch chan<- prometheus.Metric) error {
-	db, err := server.GetDB()
-	if err != nil {
-		return err
+const statBGWriterQueryPrePG17 = `SELECT
+		checkpoints_timed
+		,checkpoints_req
+		,checkpoint_write_time
+		,checkpoint_sync_time
+		,buffers_checkpoint
+		,buffers_clean
+		,maxwritten_clean
+		,buffers_backend
+		,buffers_backend_fsync
+		,buffers_alloc
+		,stats_reset
+	FROM pg_stat_bgwriter;`
+
+const statBGWriterQueryPost17 = `SELECT
+		buffers_clean
+		,maxwritten_clean
+		,buffers_alloc
+		,stats_reset
+	FROM pg_stat_bgwriter;`
+
+const statCheckpointerQuery = `SELECT
+		num_timed
+		,num_requested
+		,restartpoints_timed
+		,restartpoints_req
+		,restartpoints_done
+		,write_time
+		,sync_time
+		,buffers_written
+		,stats_reset
+	FROM pg_stat_checkpointer;`
+
+func (p PGStatBGWriterCollector) Update(ctx context.Context, instance *instance, ch chan<- prometheus.Metric) error {
+	db := instance.getDB()
+
+	var cpt, cpr, bcp, bc, mwc, bb, bbf, ba sql.NullInt64
+	var cpwt, cpst sql.NullFloat64
+	var sr sql.NullTime
+
+	if instance.version.GE(semver.MustParse("17.0.0")) {
+		row := db.QueryRowContext(ctx,
+			statBGWriterQueryPost17)
+		err := row.Scan(&bc, &mwc, &ba, &sr)
+		if err != nil {
+			return err
+		}
+		var rpt, rpr, rpd sql.NullInt64
+		var csr sql.NullTime
+		// these variables are not used, but I left them here for reference
+		row = db.QueryRowContext(ctx,
+			statCheckpointerQuery)
+		err = row.Scan(&cpt, &cpr, &rpt, &rpr, &rpd, &cpwt, &cpst, &bcp, &csr)
+		if err != nil {
+			return err
+		}
+	} else {
+		row := db.QueryRowContext(ctx,
+			statBGWriterQueryPrePG17)
+		err := row.Scan(&cpt, &cpr, &cpwt, &cpst, &bcp, &bc, &mwc, &bb, &bbf, &ba, &sr)
+		if err != nil {
+			return err
+		}
 	}
 
-	row := db.QueryRowContext(ctx,
-		`SELECT
-			 checkpoints_timed
-			 ,checkpoints_req
-			 ,checkpoint_write_time
-			 ,checkpoint_sync_time
-			 ,buffers_checkpoint
-			 ,buffers_clean
-			 ,maxwritten_clean
-			 ,buffers_backend
-			 ,buffers_backend_fsync
-			 ,buffers_alloc
-			 ,stats_reset
-		 FROM pg_stat_bgwriter;`)
-
-	var cpt int
-	var cpr int
-	var cpwt float64
-	var cpst float64
-	var bcp int
-	var bc int
-	var mwc int
-	var bb int
-	var bbf int
-	var ba int
-	var sr time.Time
-
-	err = row.Scan(&cpt, &cpr, &cpwt, &cpst, &bcp, &bc, &mwc, &bb, &bbf, &ba, &sr)
-	if err != nil {
-		return err
+	cptMetric := 0.0
+	if cpt.Valid {
+		cptMetric = float64(cpt.Int64)
 	}
+	ch <- prometheus.MustNewConstMetric(
+		statBGWriterCheckpointsTimedDesc,
+		prometheus.CounterValue,
+		cptMetric,
+		"exporter",
+		instance.name,
+	)
+	cprMetric := 0.0
+	if cpr.Valid {
+		cprMetric = float64(cpr.Int64)
+	}
+	ch <- prometheus.MustNewConstMetric(
+		statBGWriterCheckpointsReqDesc,
+		prometheus.CounterValue,
+		cprMetric,
+		"exporter",
+		instance.name,
+	)
+	cpwtMetric := 0.0
+	if cpwt.Valid {
+		cpwtMetric = float64(cpwt.Float64)
+	}
+	ch <- prometheus.MustNewConstMetric(
+		statBGWriterCheckpointsReqTimeDesc,
+		prometheus.CounterValue,
+		cpwtMetric,
+		"exporter",
+		instance.name,
+	)
+	cpstMetric := 0.0
+	if cpst.Valid {
+		cpstMetric = float64(cpst.Float64)
+	}
+	ch <- prometheus.MustNewConstMetric(
+		statBGWriterCheckpointsSyncTimeDesc,
+		prometheus.CounterValue,
+		cpstMetric,
+		"exporter",
+		instance.name,
+	)
+	bcpMetric := 0.0
+	if bcp.Valid {
+		bcpMetric = float64(bcp.Int64)
+	}
+	ch <- prometheus.MustNewConstMetric(
+		statBGWriterBuffersCheckpointDesc,
+		prometheus.CounterValue,
+		bcpMetric,
+		"exporter",
+		instance.name,
+	)
+	bcMetric := 0.0
+	if bc.Valid {
+		bcMetric = float64(bc.Int64)
+	}
+	ch <- prometheus.MustNewConstMetric(
+		statBGWriterBuffersCleanDesc,
+		prometheus.CounterValue,
+		bcMetric,
+		"exporter",
+		instance.name,
+	)
+	mwcMetric := 0.0
+	if mwc.Valid {
+		mwcMetric = float64(mwc.Int64)
+	}
+	ch <- prometheus.MustNewConstMetric(
+		statBGWriterMaxwrittenCleanDesc,
+		prometheus.CounterValue,
+		mwcMetric,
+		"exporter",
+		instance.name,
+	)
+	bbMetric := 0.0
+	if bb.Valid {
+		bbMetric = float64(bb.Int64)
+	}
+	ch <- prometheus.MustNewConstMetric(
+		statBGWriterBuffersBackendDesc,
+		prometheus.CounterValue,
+		bbMetric,
+		"exporter",
+		instance.name,
+	)
+	bbfMetric := 0.0
+	if bbf.Valid {
+		bbfMetric = float64(bbf.Int64)
+	}
+	ch <- prometheus.MustNewConstMetric(
+		statBGWriterBuffersBackendFsyncDesc,
+		prometheus.CounterValue,
+		bbfMetric,
+		"exporter",
+		instance.name,
+	)
+	baMetric := 0.0
+	if ba.Valid {
+		baMetric = float64(ba.Int64)
+	}
+	ch <- prometheus.MustNewConstMetric(
+		statBGWriterBuffersAllocDesc,
+		prometheus.CounterValue,
+		baMetric,
+		"exporter",
+		instance.name,
+	)
+	srMetric := 0.0
+	if sr.Valid {
+		srMetric = float64(sr.Time.Unix())
+	}
+	ch <- prometheus.MustNewConstMetric(
+		statBGWriterStatsResetDesc,
+		prometheus.CounterValue,
+		srMetric,
+		"exporter",
+		instance.name,
+	)
 
-	ch <- prometheus.MustNewConstMetric(
-		statBGWriter["checkpoints_timed"],
-		prometheus.CounterValue,
-		float64(cpt),
-		"exporter",
-		server.GetName(),
-	)
-	ch <- prometheus.MustNewConstMetric(
-		statBGWriter["checkpoints_req"],
-		prometheus.CounterValue,
-		float64(cpr),
-		"exporter",
-		server.GetName(),
-	)
-	ch <- prometheus.MustNewConstMetric(
-		statBGWriter["checkpoint_write_time"],
-		prometheus.CounterValue,
-		float64(cpwt),
-		"exporter",
-		server.GetName(),
-	)
-	ch <- prometheus.MustNewConstMetric(
-		statBGWriter["checkpoint_sync_time"],
-		prometheus.CounterValue,
-		float64(cpst),
-		"exporter",
-		server.GetName(),
-	)
-	ch <- prometheus.MustNewConstMetric(
-		statBGWriter["buffers_checkpoint"],
-		prometheus.CounterValue,
-		float64(bcp),
-		"exporter",
-		server.GetName(),
-	)
-	ch <- prometheus.MustNewConstMetric(
-		statBGWriter["buffers_clean"],
-		prometheus.CounterValue,
-		float64(bc),
-		"exporter",
-		server.GetName(),
-	)
-	ch <- prometheus.MustNewConstMetric(
-		statBGWriter["maxwritten_clean"],
-		prometheus.CounterValue,
-		float64(mwc),
-		"exporter",
-		server.GetName(),
-	)
-	ch <- prometheus.MustNewConstMetric(
-		statBGWriter["buffers_backend"],
-		prometheus.CounterValue,
-		float64(bb),
-		"exporter",
-		server.GetName(),
-	)
-	ch <- prometheus.MustNewConstMetric(
-		statBGWriter["buffers_backend_fsync"],
-		prometheus.CounterValue,
-		float64(bbf),
-		"exporter",
-		server.GetName(),
-	)
-	ch <- prometheus.MustNewConstMetric(
-		statBGWriter["buffers_alloc"],
-		prometheus.CounterValue,
-		float64(ba),
-		"exporter",
-		server.GetName(),
-	)
-	ch <- prometheus.MustNewConstMetric(
-		statBGWriter["stats_reset"],
-		prometheus.CounterValue,
-		float64(sr.Unix()),
-		"exporter",
-		server.GetName(),
-	)
+	// TODO: analyze metrics below, why do we duplicate them?
 
 	ch <- prometheus.MustNewConstMetric(
 		statBGWriter["percona_checkpoints_timed"],
 		prometheus.CounterValue,
-		float64(cpt),
+		cptMetric,
 		"exporter",
-		server.GetName(),
+		instance.name,
 	)
 	ch <- prometheus.MustNewConstMetric(
 		statBGWriter["percona_checkpoints_req"],
 		prometheus.CounterValue,
-		float64(cpr),
+		cprMetric,
 		"exporter",
-		server.GetName(),
+		instance.name,
 	)
 	ch <- prometheus.MustNewConstMetric(
 		statBGWriter["percona_checkpoint_write_time"],
 		prometheus.CounterValue,
-		float64(cpwt),
+		cpwtMetric,
 		"exporter",
-		server.GetName(),
+		instance.name,
 	)
 	ch <- prometheus.MustNewConstMetric(
 		statBGWriter["percona_checkpoint_sync_time"],
 		prometheus.CounterValue,
-		float64(cpst),
+		cpstMetric,
 		"exporter",
-		server.GetName(),
+		instance.name,
 	)
 	ch <- prometheus.MustNewConstMetric(
 		statBGWriter["percona_buffers_checkpoint"],
 		prometheus.CounterValue,
-		float64(bcp),
+		bcpMetric,
 		"exporter",
-		server.GetName(),
+		instance.name,
 	)
 	ch <- prometheus.MustNewConstMetric(
 		statBGWriter["percona_buffers_clean"],
 		prometheus.CounterValue,
-		float64(bc),
+		bcMetric,
 		"exporter",
-		server.GetName(),
+		instance.name,
 	)
 	ch <- prometheus.MustNewConstMetric(
 		statBGWriter["percona_maxwritten_clean"],
 		prometheus.CounterValue,
-		float64(mwc),
+		mwcMetric,
 		"exporter",
-		server.GetName(),
+		instance.name,
 	)
 	ch <- prometheus.MustNewConstMetric(
 		statBGWriter["percona_buffers_backend"],
 		prometheus.CounterValue,
-		float64(bb),
+		bbMetric,
 		"exporter",
-		server.GetName(),
+		instance.name,
 	)
 	ch <- prometheus.MustNewConstMetric(
 		statBGWriter["percona_buffers_backend_fsync"],
 		prometheus.CounterValue,
-		float64(bbf),
+		bbfMetric,
 		"exporter",
-		server.GetName(),
+		instance.name,
 	)
 	ch <- prometheus.MustNewConstMetric(
 		statBGWriter["percona_buffers_alloc"],
 		prometheus.CounterValue,
-		float64(ba),
+		baMetric,
 		"exporter",
-		server.GetName(),
+		instance.name,
 	)
 	ch <- prometheus.MustNewConstMetric(
 		statBGWriter["percona_stats_reset"],
 		prometheus.CounterValue,
-		float64(sr.Unix()),
+		srMetric,
 		"exporter",
-		server.GetName(),
+		instance.name,
 	)
-
 	return nil
 }

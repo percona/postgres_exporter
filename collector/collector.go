@@ -20,14 +20,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/alecthomas/kingpin/v2"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
-	"gopkg.in/alecthomas/kingpin.v2"
+	"golang.org/x/sync/semaphore"
 )
 
 var (
-	factories              = make(map[string]func(logger log.Logger) (Collector, error))
+	factories              = make(map[string]func(collectorConfig) (Collector, error))
 	initiatedCollectorsMtx = sync.Mutex{}
 	initiatedCollectors    = make(map[string]Collector)
 	collectorState         = make(map[string]*bool)
@@ -38,8 +39,8 @@ const (
 	// Namespace for all metrics.
 	namespace = "pg"
 
-	defaultEnabled = true
-	// defaultDisabled = false
+	defaultEnabled  = true
+	defaultDisabled = false
 )
 
 var (
@@ -58,10 +59,15 @@ var (
 )
 
 type Collector interface {
-	Update(ctx context.Context, server *server, ch chan<- prometheus.Metric) error
+	Update(ctx context.Context, instance *instance, ch chan<- prometheus.Metric) error
 }
 
-func registerCollector(name string, isDefaultEnabled bool, createFunc func(logger log.Logger) (Collector, error)) {
+type collectorConfig struct {
+	logger           log.Logger
+	excludeDatabases []string
+}
+
+func registerCollector(name string, isDefaultEnabled bool, createFunc func(collectorConfig) (Collector, error)) {
 	var helpDefaultState string
 	if isDefaultEnabled {
 		helpDefaultState = "enabled"
@@ -86,13 +92,16 @@ type PostgresCollector struct {
 	Collectors map[string]Collector
 	logger     log.Logger
 
-	servers map[string]*server
+	instance *instance
+
+	connSema *semaphore.Weighted
+	ctx      context.Context
 }
 
 type Option func(*PostgresCollector) error
 
 // NewPostgresCollector creates a new PostgresCollector.
-func NewPostgresCollector(logger log.Logger, dsns []string, filters []string, options ...Option) (*PostgresCollector, error) {
+func NewPostgresCollector(logger log.Logger, excludeDatabases []string, dsn string, filters []string, options ...Option) (*PostgresCollector, error) {
 	p := &PostgresCollector{
 		logger: logger,
 	}
@@ -125,7 +134,10 @@ func NewPostgresCollector(logger log.Logger, dsns []string, filters []string, op
 		if collector, ok := initiatedCollectors[key]; ok {
 			collectors[key] = collector
 		} else {
-			collector, err := factories[key](log.With(logger, "collector", key))
+			collector, err := factories[key](collectorConfig{
+				logger:           log.With(logger, "collector", key),
+				excludeDatabases: excludeDatabases,
+			})
 			if err != nil {
 				return nil, err
 			}
@@ -136,19 +148,33 @@ func NewPostgresCollector(logger log.Logger, dsns []string, filters []string, op
 
 	p.Collectors = collectors
 
-	servers := make(map[string]*server)
-	for _, dsn := range dsns {
-		s, err := makeServer(dsn)
-		if err != nil {
-			return nil, err
-		}
-
-		servers[dsn] = s
+	if dsn == "" {
+		return nil, errors.New("empty dsn")
 	}
 
-	p.servers = servers
+	instance, err := newInstance(dsn)
+	if err != nil {
+		return nil, err
+	}
+	p.instance = instance
 
 	return p, nil
+}
+
+// WithContext sets context for the collector.
+func WithContext(ctx context.Context) Option {
+	return func(c *PostgresCollector) error {
+		c.ctx = ctx
+		return nil
+	}
+}
+
+// WithConnectionsSemaphore sets the semaphore for limiting the number of connections to the database instance.
+func WithConnectionsSemaphore(sem *semaphore.Weighted) Option {
+	return func(c *PostgresCollector) error {
+		c.connSema = sem
+		return nil
+	}
 }
 
 // Describe implements the prometheus.Collector interface.
@@ -159,33 +185,39 @@ func (p PostgresCollector) Describe(ch chan<- *prometheus.Desc) {
 
 // Collect implements the prometheus.Collector interface.
 func (p PostgresCollector) Collect(ch chan<- prometheus.Metric) {
-	ctx := context.TODO()
-	wg := sync.WaitGroup{}
-	wg.Add(len(p.servers))
-	for _, s := range p.servers {
-		go func(s *server) {
-			p.subCollect(ctx, s, ch)
-			wg.Done()
-		}(s)
-	}
-	wg.Wait()
-}
+	// copy the instance so that concurrent scrapes have independent instances
+	inst := p.instance.copy()
 
-func (p PostgresCollector) subCollect(ctx context.Context, server *server, ch chan<- prometheus.Metric) {
+	if p.connSema != nil {
+		if err := p.connSema.Acquire(p.ctx, 1); err != nil {
+			level.Warn(p.logger).Log("msg", "Failed to acquire semaphore", "err", err)
+			return
+		}
+		defer p.connSema.Release(1)
+	}
+
+	// Set up the database connection for the collector.
+	err := inst.setup()
+	if err != nil {
+		level.Error(p.logger).Log("msg", "Error opening connection to database", "err", err)
+		return
+	}
+	defer inst.Close()
+
 	wg := sync.WaitGroup{}
 	wg.Add(len(p.Collectors))
 	for name, c := range p.Collectors {
 		go func(name string, c Collector) {
-			execute(ctx, name, c, server, ch, p.logger)
+			execute(p.ctx, name, c, inst, ch, p.logger)
 			wg.Done()
 		}(name, c)
 	}
 	wg.Wait()
 }
 
-func execute(ctx context.Context, name string, c Collector, s *server, ch chan<- prometheus.Metric, logger log.Logger) {
+func execute(ctx context.Context, name string, c Collector, instance *instance, ch chan<- prometheus.Metric, logger log.Logger) {
 	begin := time.Now()
-	err := c.Update(ctx, s, ch)
+	err := c.Update(ctx, instance, ch)
 	duration := time.Since(begin)
 	var success float64
 

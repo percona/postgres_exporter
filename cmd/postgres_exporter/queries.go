@@ -14,10 +14,11 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
-	"github.com/blang/semver"
+	"github.com/blang/semver/v4"
 	"github.com/go-kit/log/level"
 	"gopkg.in/yaml.v2"
 )
@@ -46,30 +47,6 @@ type OverrideQuery struct {
 // Overriding queries for namespaces above.
 // TODO: validate this is a closed set in tests, and there are no overlaps
 var queryOverrides = map[string][]OverrideQuery{
-	"pg_locks": {
-		{
-			semver.MustParseRange(">0.0.0"),
-			`SELECT pg_database.datname,tmp.mode,COALESCE(count,0) as count
-			FROM
-				(
-				  VALUES ('accesssharelock'),
-				         ('rowsharelock'),
-				         ('rowexclusivelock'),
-				         ('shareupdateexclusivelock'),
-				         ('sharelock'),
-				         ('sharerowexclusivelock'),
-				         ('exclusivelock'),
-				         ('accessexclusivelock'),
-					 ('sireadlock')
-				) AS tmp(mode) CROSS JOIN pg_database
-			LEFT JOIN
-			  (SELECT database, lower(mode) AS mode,count(*) AS count
-			  FROM pg_locks WHERE database IS NOT NULL
-			  GROUP BY database, lower(mode)
-			) AS tmp2
-			ON tmp.mode=tmp2.mode and pg_database.oid = tmp2.database ORDER BY 1`,
-		},
-	},
 	"pg_lock_conflicts": {
 		{
 			semver.MustParseRange(">0.0.0"),
@@ -119,6 +96,7 @@ var queryOverrides = map[string][]OverrideQuery{
 			`
 			SELECT slot_name, database, active, pg_xlog_location_diff(pg_current_xlog_location(), restart_lsn)
 			FROM pg_replication_slots
+                        WHERE pg_is_in_recovery() = False
 			`,
 		},
 		{
@@ -126,6 +104,7 @@ var queryOverrides = map[string][]OverrideQuery{
 			`
 			SELECT slot_name, database, active, pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn)
 			FROM pg_replication_slots
+                        WHERE pg_is_in_recovery() = False
 			`,
 		},
 	},
@@ -152,7 +131,8 @@ var queryOverrides = map[string][]OverrideQuery{
 				tmp2.usename,
 				tmp2.application_name,
 				COALESCE(count,0) as count,
-				COALESCE(max_tx_duration,0) as max_tx_duration
+				COALESCE(max_tx_duration,0) as max_tx_duration,
+				COALESCE(max_state_duration, 0) AS max_state_duration
 			FROM
 				(
 				  VALUES ('active'),
@@ -170,8 +150,9 @@ var queryOverrides = map[string][]OverrideQuery{
 					usename,
 					application_name,
 					count(*) AS count,
-					MAX(EXTRACT(EPOCH FROM now() - xact_start))::float AS max_tx_duration
-				FROM pg_stat_activity GROUP BY datname,state,usename,application_name) AS tmp2
+					MAX(EXTRACT(EPOCH FROM now() - xact_start))::float AS max_tx_duration,
+					MAX(EXTRACT(EPOCH FROM now() - state_change))::float AS max_state_duration
+				FROM pg_stat_activity WHERE query not like 'autovacuum:%' GROUP BY datname,state,usename,application_name) AS tmp2
 				ON tmp.state = tmp2.state AND pg_database.datname = tmp2.datname
 			`,
 		},
@@ -184,7 +165,8 @@ var queryOverrides = map[string][]OverrideQuery{
 				usename,
 				application_name,
 				COALESCE(count(*),0) AS count,
-				COALESCE(MAX(EXTRACT(EPOCH FROM now() - xact_start))::float,0) AS max_tx_duration
+				COALESCE(MAX(EXTRACT(EPOCH FROM now() - xact_start))::float,0) AS max_tx_duration,
+				COALESCE(MAX(EXTRACT(EPOCH FROM now() - state_change))::float,0) AS max_state_duration
 			FROM pg_stat_activity GROUP BY datname,usename,application_name
 			`,
 		},
@@ -300,8 +282,8 @@ func addQueries(content []byte, pgVersion semver.Version, server *Server) error 
 	return nil
 }
 
-func queryDatabases(server *Server) ([]string, error) {
-	rows, err := server.db.Query("SELECT datname FROM pg_database WHERE datallowconn = true AND datistemplate = false AND datname != current_database()")
+func queryDatabases(ctx context.Context, server *Server) ([]string, error) {
+	rows, err := server.db.QueryContext(ctx, "SELECT datname FROM pg_database WHERE datallowconn = true AND datistemplate = false AND datname != current_database() AND has_database_privilege(current_user, datname, 'connect')")
 	if err != nil {
 		return nil, fmt.Errorf("Error retrieving databases: %v", err)
 	}

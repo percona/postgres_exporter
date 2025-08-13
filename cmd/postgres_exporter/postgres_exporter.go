@@ -14,17 +14,21 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
 	"math"
 	"regexp"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
-	"github.com/blang/semver"
+	"github.com/blang/semver/v4"
 	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
+	"golang.org/x/sync/semaphore"
 )
 
 // ColumnUsage should be one of several enum values which describe how a
@@ -161,48 +165,6 @@ func dumpMaps() {
 }
 
 var builtinMetricMaps = map[string]intermediateMetricMap{
-	"pg_stat_bgwriter": {
-		map[string]ColumnMapping{
-			"checkpoints_timed":     {COUNTER, "Number of scheduled checkpoints that have been performed", nil, nil},
-			"checkpoints_req":       {COUNTER, "Number of requested checkpoints that have been performed", nil, nil},
-			"checkpoint_write_time": {COUNTER, "Total amount of time that has been spent in the portion of checkpoint processing where files are written to disk, in milliseconds", nil, nil},
-			"checkpoint_sync_time":  {COUNTER, "Total amount of time that has been spent in the portion of checkpoint processing where files are synchronized to disk, in milliseconds", nil, nil},
-			"buffers_checkpoint":    {COUNTER, "Number of buffers written during checkpoints", nil, nil},
-			"buffers_clean":         {COUNTER, "Number of buffers written by the background writer", nil, nil},
-			"maxwritten_clean":      {COUNTER, "Number of times the background writer stopped a cleaning scan because it had written too many buffers", nil, nil},
-			"buffers_backend":       {COUNTER, "Number of buffers written directly by a backend", nil, nil},
-			"buffers_backend_fsync": {COUNTER, "Number of times a backend had to execute its own fsync call (normally the background writer handles those even when the backend does its own write)", nil, nil},
-			"buffers_alloc":         {COUNTER, "Number of buffers allocated", nil, nil},
-			"stats_reset":           {COUNTER, "Time at which these statistics were last reset", nil, nil},
-		},
-		true,
-		0,
-	},
-	"pg_stat_database": {
-		map[string]ColumnMapping{
-			"datid":          {LABEL, "OID of a database", nil, nil},
-			"datname":        {LABEL, "Name of this database", nil, nil},
-			"numbackends":    {GAUGE, "Number of backends currently connected to this database. This is the only column in this view that returns a value reflecting current state; all other columns return the accumulated values since the last reset.", nil, nil},
-			"xact_commit":    {COUNTER, "Number of transactions in this database that have been committed", nil, nil},
-			"xact_rollback":  {COUNTER, "Number of transactions in this database that have been rolled back", nil, nil},
-			"blks_read":      {COUNTER, "Number of disk blocks read in this database", nil, nil},
-			"blks_hit":       {COUNTER, "Number of times disk blocks were found already in the buffer cache, so that a read was not necessary (this only includes hits in the PostgreSQL buffer cache, not the operating system's file system cache)", nil, nil},
-			"tup_returned":   {COUNTER, "Number of rows returned by queries in this database", nil, nil},
-			"tup_fetched":    {COUNTER, "Number of rows fetched by queries in this database", nil, nil},
-			"tup_inserted":   {COUNTER, "Number of rows inserted by queries in this database", nil, nil},
-			"tup_updated":    {COUNTER, "Number of rows updated by queries in this database", nil, nil},
-			"tup_deleted":    {COUNTER, "Number of rows deleted by queries in this database", nil, nil},
-			"conflicts":      {COUNTER, "Number of queries canceled due to conflicts with recovery in this database. (Conflicts occur only on standby servers; see pg_stat_database_conflicts for details.)", nil, nil},
-			"temp_files":     {COUNTER, "Number of temporary files created by queries in this database. All temporary files are counted, regardless of why the temporary file was created (e.g., sorting or hashing), and regardless of the log_temp_files setting.", nil, nil},
-			"temp_bytes":     {COUNTER, "Total amount of data written to temporary files by queries in this database. All temporary files are counted, regardless of why the temporary file was created, and regardless of the log_temp_files setting.", nil, nil},
-			"deadlocks":      {COUNTER, "Number of deadlocks detected in this database", nil, nil},
-			"blk_read_time":  {COUNTER, "Time spent reading data file blocks by backends in this database, in milliseconds", nil, nil},
-			"blk_write_time": {COUNTER, "Time spent writing data file blocks by backends in this database, in milliseconds", nil, nil},
-			"stats_reset":    {COUNTER, "Time at which these statistics were last reset", nil, nil},
-		},
-		true,
-		0,
-	},
 	"pg_stat_database_conflicts": {
 		map[string]ColumnMapping{
 			"datid":            {LABEL, "OID of a database", nil, nil},
@@ -212,15 +174,6 @@ var builtinMetricMaps = map[string]intermediateMetricMap{
 			"confl_snapshot":   {COUNTER, "Number of queries in this database that have been canceled due to old snapshots", nil, nil},
 			"confl_bufferpin":  {COUNTER, "Number of queries in this database that have been canceled due to pinned buffers", nil, nil},
 			"confl_deadlock":   {COUNTER, "Number of queries in this database that have been canceled due to deadlocks", nil, nil},
-		},
-		true,
-		0,
-	},
-	"pg_locks": {
-		map[string]ColumnMapping{
-			"datname": {LABEL, "Name of this database", nil, nil},
-			"mode":    {LABEL, "Type of Lock", nil, nil},
-			"count":   {GAUGE, "Number of locks", nil, nil},
 		},
 		true,
 		0,
@@ -305,12 +258,13 @@ var builtinMetricMaps = map[string]intermediateMetricMap{
 	},
 	"pg_stat_activity": {
 		map[string]ColumnMapping{
-			"datname":          {LABEL, "Name of this database", nil, nil},
-			"state":            {LABEL, "connection state", nil, semver.MustParseRange(">=9.2.0")},
-			"usename":          {LABEL, "Name of the user logged into this backend", nil, nil},
-			"application_name": {LABEL, "Name of the application that is connected to this backend", nil, nil},
-			"count":            {GAUGE, "number of connections in this state", nil, nil},
-			"max_tx_duration":  {GAUGE, "max duration in seconds any active transaction has been running", nil, nil},
+			"datname":            {LABEL, "Name of this database", nil, nil},
+			"state":              {LABEL, "connection state", nil, semver.MustParseRange(">=9.2.0")},
+			"usename":            {LABEL, "Name of the user logged into this backend", nil, nil},
+			"application_name":   {LABEL, "Name of the application that is connected to this backend", nil, nil},
+			"count":              {GAUGE, "number of connections in this state", nil, nil},
+			"max_tx_duration":    {GAUGE, "max duration in seconds any active transaction has been running", nil, nil},
+			"max_state_duration": {GAUGE, "max state change duration in seconds any active transaction has been", nil, nil},
 		},
 		true,
 		0,
@@ -460,9 +414,10 @@ type cachedMetrics struct {
 
 // Exporter collects Postgres metrics. It implements prometheus.Collector.
 type Exporter struct {
-	collectorName      string
-	userQueriesPath    map[MetricResolution]string
-	userQueriesEnabled map[MetricResolution]bool
+	collectorName     string
+	userQueriesPath   map[MetricResolution]string
+	resolutionEnabled MetricResolution
+	enabled           bool
 
 	// Holds a reference to the build in column mappings. Currently this is for testing purposes
 	// only, since it just points to the global.
@@ -482,7 +437,11 @@ type Exporter struct {
 
 	// servers are used to allow re-using the DB connection between scrapes.
 	// servers contains metrics map and query overrides.
-	servers *Servers
+	// servers *Servers
+
+	connSema  *semaphore.Weighted
+	ctx       context.Context
+	masterDSN string
 }
 
 // ExporterOpt configures Exporter.
@@ -503,9 +462,30 @@ func CollectorName(name string) ExporterOpt {
 }
 
 // WithUserQueriesEnabled enables user's queries.
-func WithUserQueriesEnabled(p map[MetricResolution]bool) ExporterOpt {
+func WithUserQueriesEnabled(p MetricResolution) ExporterOpt {
 	return func(e *Exporter) {
-		e.userQueriesEnabled = p
+		e.resolutionEnabled = p
+	}
+}
+
+// WithUserQueriesEnabled enables user's queries.
+func WithEnabled(p bool) ExporterOpt {
+	return func(e *Exporter) {
+		e.enabled = p
+	}
+}
+
+// WithContext sets context for the exporter.
+func WithContext(ctx context.Context) ExporterOpt {
+	return func(e *Exporter) {
+		e.ctx = ctx
+	}
+}
+
+// WithConnectionsSemaphore sets the semaphore for limiting the number of connections to the database instance.
+func WithConnectionsSemaphore(sem *semaphore.Weighted) ExporterOpt {
+	return func(e *Exporter) {
+		e.connSema = sem
 	}
 }
 
@@ -524,9 +504,9 @@ func AutoDiscoverDatabases(b bool) ExporterOpt {
 }
 
 // ExcludeDatabases allows to filter out result from AutoDiscoverDatabases
-func ExcludeDatabases(s string) ExporterOpt {
+func ExcludeDatabases(s []string) ExporterOpt {
 	return func(e *Exporter) {
-		e.excludeDatabases = strings.Split(s, ",")
+		e.excludeDatabases = s
 	}
 }
 
@@ -589,6 +569,8 @@ func NewExporter(dsn []string, opts ...ExporterOpt) *Exporter {
 	e := &Exporter{
 		dsn:               dsn,
 		builtinMetricMaps: builtinMetricMaps,
+		enabled:           true,
+		ctx:               context.Background(),
 	}
 
 	for _, opt := range opts {
@@ -596,9 +578,36 @@ func NewExporter(dsn []string, opts ...ExporterOpt) *Exporter {
 	}
 
 	e.setupInternalMetrics()
-	e.servers = NewServers(ServerWithLabels(e.constantLabels))
+	// e.servers = NewServers(ServerWithLabels(e.constantLabels))
 
 	return e
+}
+
+// GetServer returns a new Server instance for the provided DSN.
+func (e *Exporter) GetServer(dsn string, opts ...ServerOpt) (*Server, error) {
+	var err error
+	errCount := 0 // start at zero because we increment before doing work
+	retries := 1
+	var server *Server
+	for {
+		if errCount++; errCount > retries {
+			return nil, err
+		}
+
+		server, err = NewServer(dsn, opts...)
+		if err != nil {
+			time.Sleep(time.Duration(errCount) * time.Second)
+			continue
+		}
+
+		if err = server.Ping(); err != nil {
+			server.Close()
+			time.Sleep(time.Duration(errCount) * time.Second)
+			continue
+		}
+		break
+	}
+	return server, nil
 }
 
 func (e *Exporter) setupInternalMetrics() {
@@ -644,6 +653,9 @@ func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
 
 // Collect implements prometheus.Collector.
 func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
+	if !e.enabled {
+		return
+	}
 	e.scrape(ch)
 
 	ch <- e.duration
@@ -688,34 +700,29 @@ func (e *Exporter) checkMapVersions(ch chan<- prometheus.Metric, server *Server)
 	}
 
 	// Check if semantic version changed and recalculate maps if needed.
-	if semanticVersion.NE(server.lastMapVersion) || server.metricMap == nil {
-		level.Info(logger).Log("msg", "Semantic version changed", "server", server, "from", server.lastMapVersion, "to", semanticVersion)
-		server.mappingMtx.Lock()
+	// if semanticVersion.NE(server.lastMapVersion[e.resolutionEnabled]) || server.metricMap == nil {
+	//	level.Info(logger).Log("msg", "Semantic version changed", "server", server, "from", server.lastMapVersion[e.resolutionEnabled], "to", semanticVersion)
+	server.mappingMtx.Lock()
 
-		// Get Default Metrics only for master database
-		if !e.disableDefaultMetrics && server.master {
-			server.metricMap = makeDescMap(semanticVersion, server.labels, e.builtinMetricMaps)
-			server.queryOverrides = makeQueryOverrideMap(semanticVersion, queryOverrides)
-		} else {
-			server.metricMap = make(map[string]MetricMapNamespace)
-			server.queryOverrides = make(map[string]string)
-		}
-
-		server.lastMapVersion = semanticVersion
-
-		if e.userQueriesPath[HR] != "" || e.userQueriesPath[MR] != "" || e.userQueriesPath[LR] != "" {
-			// Clear the metric while reload
-			e.userQueriesError.Reset()
-		}
-
-		for res := range e.userQueriesPath {
-			if e.userQueriesEnabled[res] {
-				e.loadCustomQueries(res, semanticVersion, server)
-			}
-		}
-
-		server.mappingMtx.Unlock()
+	// Get Default Metrics only for master database
+	if !e.disableDefaultMetrics && server.master {
+		server.metricMap = makeDescMap(semanticVersion, server.labels, e.builtinMetricMaps)
+		server.queryOverrides = makeQueryOverrideMap(semanticVersion, queryOverrides)
+	} else {
+		server.metricMap = make(map[string]MetricMapNamespace)
+		server.queryOverrides = make(map[string]string)
 	}
+
+	// server.lastMapVersion[e.resolutionEnabled] = semanticVersion
+
+	if e.userQueriesPath[HR] != "" || e.userQueriesPath[MR] != "" || e.userQueriesPath[LR] != "" {
+		// Clear the metric while reload
+		e.userQueriesError.Reset()
+	}
+
+	e.loadCustomQueries(e.resolutionEnabled, semanticVersion, server)
+
+	server.mappingMtx.Unlock()
 
 	// Output the version as a special metric only for master database
 	versionDesc := prometheus.NewDesc(fmt.Sprintf("%s_%s", namespace, staticLabelName),
@@ -740,29 +747,45 @@ func (e *Exporter) scrape(ch chan<- prometheus.Metric) {
 		dsns = e.discoverDatabaseDSNs()
 	}
 
-	var errorsCount int
-	var connectionErrorsCount int
+	var errorsCount atomic.Int32
+	var connectionErrorsCount atomic.Int32
+	var wg sync.WaitGroup
 
 	for _, dsn := range dsns {
-		if err := e.scrapeDSN(ch, dsn); err != nil {
-			errorsCount++
+		dsn := dsn
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
 
-			level.Error(logger).Log("err", err)
-
-			if _, ok := err.(*ErrorConnectToServer); ok {
-				connectionErrorsCount++
+			if e.connSema != nil {
+				if err := e.connSema.Acquire(e.ctx, 1); err != nil {
+					level.Warn(logger).Log("msg", "Failed to acquire semaphore", "err", err)
+					return
+				}
+				defer e.connSema.Release(1)
 			}
-		}
+			if err := e.scrapeDSN(ch, dsn); err != nil {
+				errorsCount.Add(1)
+
+				level.Error(logger).Log("err", err)
+
+				if _, ok := err.(*ErrorConnectToServer); ok {
+					connectionErrorsCount.Add(1)
+				}
+			}
+		}()
 	}
 
+	wg.Wait()
+
 	switch {
-	case connectionErrorsCount >= len(dsns):
+	case int(connectionErrorsCount.Load()) >= len(dsns):
 		e.psqlUp.Set(0)
 	default:
 		e.psqlUp.Set(1) // Didn't fail, can mark connection as up for this scrape.
 	}
 
-	switch errorsCount {
+	switch errorsCount.Load() {
 	case 0:
 		e.error.Set(0)
 	default:

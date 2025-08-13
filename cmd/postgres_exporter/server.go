@@ -19,7 +19,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/blang/semver"
+	"github.com/blang/semver/v4"
 	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -54,6 +54,7 @@ func ServerWithLabels(labels prometheus.Labels) ServerOpt {
 		for k, v := range labels {
 			s.labels[k] = v
 		}
+		s.labels["collector"] = "exporter"
 	}
 }
 
@@ -126,6 +127,10 @@ func (s *Server) Scrape(ch chan<- prometheus.Metric, disableSettingsMetrics bool
 	errMap := queryNamespaceMappings(ch, s)
 	if len(errMap) > 0 {
 		err = fmt.Errorf("queryNamespaceMappings returned %d errors", len(errMap))
+		level.Error(logger).Log("msg", "NAMESPACE ERRORS FOUND")
+		for namespace, err := range errMap {
+			level.Error(logger).Log("namespace", namespace, "msg", err)
+		}
 	}
 
 	return err
@@ -169,6 +174,7 @@ func (s *Servers) GetServer(dsn string) (*Server, error) {
 			s.servers[dsn] = server
 		}
 		if err = server.Ping(); err != nil {
+			server.Close()
 			delete(s.servers, dsn)
 			time.Sleep(time.Duration(errCount) * time.Second)
 			continue
