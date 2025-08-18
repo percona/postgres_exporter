@@ -53,6 +53,8 @@ func TestPGStatDatabaseCollector(t *testing.T) {
 		"blk_read_time",
 		"blk_write_time",
 		"stats_reset",
+		"parallel_workers_to_launch",
+		"parallel_workers_launched",
 	}
 
 	srT, err := time.Parse("2006-01-02 15:04:05.00000-07", "2023-05-25 17:10:42.81132-07")
@@ -80,9 +82,12 @@ func TestPGStatDatabaseCollector(t *testing.T) {
 			925,
 			16,
 			823,
-			srT)
+			srT,
+			nil,
+			nil,
+		)
 
-	mock.ExpectQuery(sanitizeQuery(statDatabaseQuery)).WillReturnRows(rows)
+	mock.ExpectQuery(sanitizeQuery(statDatabaseQueryPre18)).WillReturnRows(rows)
 
 	ch := make(chan prometheus.Metric)
 	go func() {
@@ -160,6 +165,8 @@ func TestPGStatDatabaseCollectorNullValues(t *testing.T) {
 		"blk_read_time",
 		"blk_write_time",
 		"stats_reset",
+		"parallel_workers_to_launch",
+		"parallel_workers_launched",
 	}
 
 	rows := sqlmock.NewRows(columns).
@@ -182,7 +189,10 @@ func TestPGStatDatabaseCollectorNullValues(t *testing.T) {
 			925,
 			16,
 			823,
-			srT).
+			srT,
+			nil,
+			nil,
+		).
 		AddRow(
 			"pid",
 			"postgres",
@@ -202,8 +212,11 @@ func TestPGStatDatabaseCollectorNullValues(t *testing.T) {
 			925,
 			16,
 			823,
-			srT)
-	mock.ExpectQuery(sanitizeQuery(statDatabaseQuery)).WillReturnRows(rows)
+			srT,
+			nil,
+			nil,
+		)
+	mock.ExpectQuery(sanitizeQuery(statDatabaseQueryPre18)).WillReturnRows(rows)
 
 	ch := make(chan prometheus.Metric)
 	go func() {
@@ -276,6 +289,8 @@ func TestPGStatDatabaseCollectorRowLeakTest(t *testing.T) {
 		"blk_read_time",
 		"blk_write_time",
 		"stats_reset",
+		"parallel_workers_to_launch",
+		"parallel_workers_launched",
 	}
 
 	srT, err := time.Parse("2006-01-02 15:04:05.00000-07", "2023-05-25 17:10:42.81132-07")
@@ -303,8 +318,13 @@ func TestPGStatDatabaseCollectorRowLeakTest(t *testing.T) {
 			925,
 			16,
 			823,
-			srT).
+			srT,
+			nil,
+			nil,
+		).
 		AddRow(
+			nil,
+			nil,
 			nil,
 			nil,
 			nil,
@@ -344,8 +364,11 @@ func TestPGStatDatabaseCollectorRowLeakTest(t *testing.T) {
 			926,
 			17,
 			824,
-			srT)
-	mock.ExpectQuery(sanitizeQuery(statDatabaseQuery)).WillReturnRows(rows)
+			srT,
+			nil,
+			nil,
+		)
+	mock.ExpectQuery(sanitizeQuery(statDatabaseQueryPre18)).WillReturnRows(rows)
 
 	ch := make(chan prometheus.Metric)
 	go func() {
@@ -436,6 +459,8 @@ func TestPGStatDatabaseCollectorTestNilStatReset(t *testing.T) {
 		"blk_read_time",
 		"blk_write_time",
 		"stats_reset",
+		"parallel_workers_to_launch",
+		"parallel_workers_launched",
 	}
 
 	rows := sqlmock.NewRows(columns).
@@ -458,9 +483,12 @@ func TestPGStatDatabaseCollectorTestNilStatReset(t *testing.T) {
 			925,
 			16,
 			823,
-			nil)
+			nil,
+			nil,
+			nil,
+		)
 
-	mock.ExpectQuery(sanitizeQuery(statDatabaseQuery)).WillReturnRows(rows)
+	mock.ExpectQuery(sanitizeQuery(statDatabaseQueryPre18)).WillReturnRows(rows)
 
 	ch := make(chan prometheus.Metric)
 	go func() {

@@ -26,6 +26,34 @@ pg_database:
     - size_bytes:
         usage: "GAUGE"
         description: "Disk space used by the database"
+
+# PostgreSQL 18+ enhanced database statistics
+pg_stat_database_18:
+  query: |
+    SELECT
+      datname,
+      CASE WHEN current_setting('server_version_num')::int >= 180000
+           THEN COALESCE(parallel_workers_to_launch, 0)
+           ELSE 0 END as parallel_workers_to_launch,
+      CASE WHEN current_setting('server_version_num')::int >= 180000
+           THEN COALESCE(parallel_workers_launched, 0)
+           ELSE 0 END as parallel_workers_launched
+    FROM
+      pg_stat_database
+    WHERE
+      datname IS NOT NULL
+  master: true
+  cache_seconds: 30
+  metrics:
+    - datname:
+        usage: "LABEL"
+        description: "Name of the database"
+    - parallel_workers_to_launch:
+        usage: "COUNTER"
+        description: "Number of parallel workers to launch (PostgreSQL 18+)"
+    - parallel_workers_launched:
+        usage: "COUNTER"
+        description: "Number of parallel workers launched (PostgreSQL 18+)"
 ####
 #pg_stat_statements:
 #  query: "SELECT t2.rolname, t3.datname, queryid, calls, total_time / 1000 as total_time_seconds, min_time / 1000 as min_time_seconds, max_time / 1000 as max_time_seconds, mean_time / 1000 as mean_time_seconds, stddev_time / 1000 as stddev_time_seconds, rows, shared_blks_hit, shared_blks_read, shared_blks_dirtied, shared_blks_written, local_blks_hit, local_blks_read, local_blks_dirtied, local_blks_written, temp_blks_read, temp_blks_written, blk_read_time / 1000 as blk_read_time_seconds, blk_write_time / 1000 as blk_write_time_seconds FROM pg_stat_statements t1 JOIN pg_roles t2 ON (t1.userid=t2.oid) JOIN pg_database t3 ON (t1.dbid=t3.oid) WHERE t2.rolname != 'rdsadmin'"
