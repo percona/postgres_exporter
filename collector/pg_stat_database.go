@@ -226,7 +226,7 @@ var (
 		prometheus.Labels{},
 	)
 
-	statDatabaseQueryPre18 = `
+	statDatabaseQueryPrePG18 = `
 		SELECT
 			datid
 			,datname
@@ -252,7 +252,7 @@ var (
 		FROM pg_stat_database;
 	`
 
-	statDatabaseQuery18Plus = `
+	statDatabaseQueryPG18 = `
 		SELECT
 			datid
 			,datname
@@ -282,10 +282,11 @@ var (
 func (c *PGStatDatabaseCollector) Update(ctx context.Context, instance *instance, ch chan<- prometheus.Metric) error {
 	db := instance.getDB()
 
+	after18 := instance.version.GTE(semver.Version{Major: 18})
 	// Use version-specific query for PostgreSQL 18+
-	query := statDatabaseQueryPre18
-	if instance.version.GTE(semver.Version{Major: 18}) {
-		query = statDatabaseQuery18Plus
+	query := statDatabaseQueryPrePG18
+	if after18 {
+		query = statDatabaseQueryPG18
 	}
 
 	rows, err := db.QueryContext(ctx, query)
@@ -406,6 +407,18 @@ func (c *PGStatDatabaseCollector) Update(ctx context.Context, instance *instance
 		}
 		if statsReset.Valid {
 			statsResetMetric = float64(statsReset.Time.Unix())
+		}
+
+		if after18 {
+			if !parallelWorkersToLaunch.Valid && after18 {
+				level.Debug(c.log).Log("msg", "Skipping collecting metric because it has no parallel_workers_to_launch")
+				continue
+			}
+
+			if !parallelWorkersLaunched.Valid {
+				level.Debug(c.log).Log("msg", "Skipping collecting metric because it has no parallel_workers_launched")
+				continue
+			}
 		}
 
 		labels := []string{datid.String, datname.String}
@@ -529,17 +542,14 @@ func (c *PGStatDatabaseCollector) Update(ctx context.Context, instance *instance
 			labels...,
 		)
 
-		// PostgreSQL 18+ parallel worker metrics
-		if parallelWorkersToLaunch.Valid {
+		if after18 {
 			ch <- prometheus.MustNewConstMetric(
 				statDatabaseParallelWorkersToLaunch,
 				prometheus.CounterValue,
 				parallelWorkersToLaunch.Float64,
 				labels...,
 			)
-		}
 
-		if parallelWorkersLaunched.Valid {
 			ch <- prometheus.MustNewConstMetric(
 				statDatabaseParallelWorkersLaunched,
 				prometheus.CounterValue,
