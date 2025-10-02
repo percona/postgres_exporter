@@ -18,11 +18,14 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/blang/semver/v4"
 	"github.com/go-kit/log"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/smartystreets/goconvey/convey"
 )
+
+var pg18 = semver.MustParse("18.0.0")
 
 func TestPGStatDatabaseCollector(t *testing.T) {
 	db, mock, err := sqlmock.New()
@@ -31,7 +34,7 @@ func TestPGStatDatabaseCollector(t *testing.T) {
 	}
 	defer db.Close()
 
-	inst := &instance{db: db}
+	inst := &instance{db: db, version: pg18}
 
 	columns := []string{
 		"datid",
@@ -83,11 +86,11 @@ func TestPGStatDatabaseCollector(t *testing.T) {
 			16,
 			823,
 			srT,
-			nil,
-			nil,
+			3,
+			2,
 		)
 
-	mock.ExpectQuery(sanitizeQuery(statDatabaseQueryPre18)).WillReturnRows(rows)
+	mock.ExpectQuery(sanitizeQuery(statDatabaseQueryPG18)).WillReturnRows(rows)
 
 	ch := make(chan prometheus.Metric)
 	go func() {
@@ -119,6 +122,8 @@ func TestPGStatDatabaseCollector(t *testing.T) {
 		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 16},
 		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 823},
 		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 1685059842},
+		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 3},
+		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 2},
 	}
 
 	convey.Convey("Metrics comparison", t, func() {
@@ -143,7 +148,7 @@ func TestPGStatDatabaseCollectorNullValues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Error parsing time: %s", err)
 	}
-	inst := &instance{db: db}
+	inst := &instance{db: db, version: pg18}
 
 	columns := []string{
 		"datid",
@@ -213,10 +218,10 @@ func TestPGStatDatabaseCollectorNullValues(t *testing.T) {
 			16,
 			823,
 			srT,
-			nil,
-			nil,
+			3,
+			2,
 		)
-	mock.ExpectQuery(sanitizeQuery(statDatabaseQueryPre18)).WillReturnRows(rows)
+	mock.ExpectQuery(sanitizeQuery(statDatabaseQueryPG18)).WillReturnRows(rows)
 
 	ch := make(chan prometheus.Metric)
 	go func() {
@@ -248,6 +253,8 @@ func TestPGStatDatabaseCollectorNullValues(t *testing.T) {
 		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 16},
 		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 823},
 		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 1685059842},
+		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 3},
+		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 2},
 	}
 
 	convey.Convey("Metrics comparison", t, func() {
@@ -267,7 +274,7 @@ func TestPGStatDatabaseCollectorRowLeakTest(t *testing.T) {
 	}
 	defer db.Close()
 
-	inst := &instance{db: db}
+	inst := &instance{db: db, version: pg18}
 
 	columns := []string{
 		"datid",
@@ -319,8 +326,8 @@ func TestPGStatDatabaseCollectorRowLeakTest(t *testing.T) {
 			16,
 			823,
 			srT,
-			nil,
-			nil,
+			5,
+			4,
 		).
 		AddRow(
 			nil,
@@ -365,10 +372,10 @@ func TestPGStatDatabaseCollectorRowLeakTest(t *testing.T) {
 			17,
 			824,
 			srT,
-			nil,
-			nil,
+			3,
+			2,
 		)
-	mock.ExpectQuery(sanitizeQuery(statDatabaseQueryPre18)).WillReturnRows(rows)
+	mock.ExpectQuery(sanitizeQuery(statDatabaseQueryPG18)).WillReturnRows(rows)
 
 	ch := make(chan prometheus.Metric)
 	go func() {
@@ -400,6 +407,8 @@ func TestPGStatDatabaseCollectorRowLeakTest(t *testing.T) {
 		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 16},
 		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 823},
 		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 1685059842},
+		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 5},
+		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 4},
 		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_GAUGE, value: 355},
 		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 4946},
 		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 289097745},
@@ -417,6 +426,8 @@ func TestPGStatDatabaseCollectorRowLeakTest(t *testing.T) {
 		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 17},
 		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 824},
 		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 1685059842},
+		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 3},
+		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 2},
 	}
 
 	convey.Convey("Metrics comparison", t, func() {
@@ -437,7 +448,7 @@ func TestPGStatDatabaseCollectorTestNilStatReset(t *testing.T) {
 	}
 	defer db.Close()
 
-	inst := &instance{db: db}
+	inst := &instance{db: db, version: pg18}
 
 	columns := []string{
 		"datid",
@@ -484,11 +495,11 @@ func TestPGStatDatabaseCollectorTestNilStatReset(t *testing.T) {
 			16,
 			823,
 			nil,
-			nil,
-			nil,
+			3,
+			2,
 		)
 
-	mock.ExpectQuery(sanitizeQuery(statDatabaseQueryPre18)).WillReturnRows(rows)
+	mock.ExpectQuery(sanitizeQuery(statDatabaseQueryPG18)).WillReturnRows(rows)
 
 	ch := make(chan prometheus.Metric)
 	go func() {
@@ -520,6 +531,8 @@ func TestPGStatDatabaseCollectorTestNilStatReset(t *testing.T) {
 		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 16},
 		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 823},
 		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 0},
+		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 3},
+		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 2},
 	}
 
 	convey.Convey("Metrics comparison", t, func() {
