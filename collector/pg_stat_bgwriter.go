@@ -47,6 +47,12 @@ var (
 		[]string{"collector", "server"},
 		prometheus.Labels{},
 	)
+	statBGWriterCheckpointsDoneDesc = prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, bgWriterSubsystem, "checkpoints_done_total"),
+		"Number of completed checkpoints",
+		[]string{"collector", "server"},
+		prometheus.Labels{},
+	)
 	statBGWriterCheckpointsReqTimeDesc = prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, bgWriterSubsystem, "checkpoint_write_time_total"),
 		"Total amount of time that has been spent in the portion of checkpoint processing where files are written to disk, in milliseconds",
@@ -95,21 +101,15 @@ var (
 		[]string{"collector", "server"},
 		prometheus.Labels{},
 	)
+	statBGWriterCheckpointsSlruWrittenDesc = prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, bgWriterSubsystem, "slru_written_total"),
+		"Number of SLRU buffers written during checkpoints and restartpoints",
+		[]string{"collector", "server"},
+		prometheus.Labels{},
+	)
 	statBGWriterStatsResetDesc = prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, bgWriterSubsystem, "stats_reset_total"),
 		"Time at which these statistics were last reset",
-		[]string{"collector", "server"},
-		prometheus.Labels{},
-	)
-	statCheckpointerNumDoneDesc = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, bgWriterSubsystem, "checkpoints_done_total"),
-		"Number of completed checkpoints (PostgreSQL 18+)",
-		[]string{"collector", "server"},
-		prometheus.Labels{},
-	)
-	statCheckpointerSlruWrittenDesc = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, bgWriterSubsystem, "slru_written_total"),
-		"Number of SLRU buffers written during checkpoints (PostgreSQL 18+)",
 		[]string{"collector", "server"},
 		prometheus.Labels{},
 	)
@@ -124,6 +124,12 @@ var statBGWriter = map[string]*prometheus.Desc{
 	"percona_checkpoints_req": prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, bgWriterSubsystem, "checkpoints_req"),
 		"Number of requested checkpoints that have been performed",
+		[]string{"collector", "server"},
+		prometheus.Labels{},
+	),
+	"percona_checkpoints_done": prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, bgWriterSubsystem, "checkpoints_done"),
+		"Number of completed checkpoints",
 		[]string{"collector", "server"},
 		prometheus.Labels{},
 	),
@@ -175,6 +181,12 @@ var statBGWriter = map[string]*prometheus.Desc{
 		[]string{"collector", "server"},
 		prometheus.Labels{},
 	),
+	"percona_slru_written": prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, bgWriterSubsystem, "slru_written"),
+		"Number of SLRU buffers written during checkpoints and restartpoints",
+		[]string{"collector", "server"},
+		prometheus.Labels{},
+	),
 	"percona_stats_reset": prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, bgWriterSubsystem, "stats_reset"),
 		"Time at which these statistics were last reset",
@@ -207,37 +219,39 @@ const statBGWriterQueryPost17 = `SELECT
 const statCheckpointerQueryPre18 = `SELECT
 		num_timed
 		,num_requested
+		,NULL::bigint as num_done
 		,restartpoints_timed
 		,restartpoints_req
 		,restartpoints_done
 		,write_time
 		,sync_time
 		,buffers_written
-		,stats_reset
-		,NULL::bigint as num_done
 		,NULL::bigint as slru_written
+		,stats_reset
 	FROM pg_stat_checkpointer;`
 
 const statCheckpointerQuery18Plus = `SELECT
 		num_timed
 		,num_requested
+		,num_done
 		,restartpoints_timed
 		,restartpoints_req
 		,restartpoints_done
 		,write_time
 		,sync_time
 		,buffers_written
-		,stats_reset
-		,num_done
 		,slru_written
+		,stats_reset
 	FROM pg_stat_checkpointer;`
 
 func (p PGStatBGWriterCollector) Update(ctx context.Context, instance *instance, ch chan<- prometheus.Metric) error {
 	db := instance.getDB()
 
-	var cpt, cpr, bcp, bc, mwc, bb, bbf, ba, numDone, slruWritten sql.NullInt64
+	var cpt, cpr, cpd, bcp, bc, mwc, bb, bbf, ba, slruw sql.NullInt64
 	var cpwt, cpst sql.NullFloat64
 	var sr sql.NullTime
+
+	after18 := instance.version.GTE(semver.Version{Major: 18})
 
 	if instance.version.GE(semver.MustParse("17.0.0")) {
 		row := db.QueryRowContext(ctx,
@@ -251,12 +265,12 @@ func (p PGStatBGWriterCollector) Update(ctx context.Context, instance *instance,
 
 		// Use version-specific checkpointer query for PostgreSQL 18+
 		checkpointerQuery := statCheckpointerQueryPre18
-		if instance.version.GTE(semver.Version{Major: 18}) {
+		if after18 {
 			checkpointerQuery = statCheckpointerQuery18Plus
 		}
 
 		row = db.QueryRowContext(ctx, checkpointerQuery)
-		err = row.Scan(&cpt, &cpr, &rpt, &rpr, &rpd, &cpwt, &cpst, &bcp, &csr, &numDone, &slruWritten)
+		err = row.Scan(&cpt, &cpr, &cpd, &rpt, &rpr, &rpd, &cpwt, &cpst, &bcp, &slruw, &csr)
 		if err != nil {
 			return err
 		}
@@ -291,6 +305,21 @@ func (p PGStatBGWriterCollector) Update(ctx context.Context, instance *instance,
 		"exporter",
 		instance.name,
 	)
+
+	cpdMetric := 0.0
+	if after18 {
+		if cpd.Valid {
+			cpdMetric = float64(cpd.Int64)
+		}
+		ch <- prometheus.MustNewConstMetric(
+			statBGWriterCheckpointsDoneDesc,
+			prometheus.CounterValue,
+			cpdMetric,
+			"exporter",
+			instance.name,
+		)
+	}
+
 	cpwtMetric := 0.0
 	if cpwt.Valid {
 		cpwtMetric = float64(cpwt.Float64)
@@ -379,6 +408,19 @@ func (p PGStatBGWriterCollector) Update(ctx context.Context, instance *instance,
 		"exporter",
 		instance.name,
 	)
+	slruwMetric := 0.0
+	if after18 {
+		if slruw.Valid {
+			slruwMetric = float64(slruw.Int64)
+		}
+		ch <- prometheus.MustNewConstMetric(
+			statBGWriterCheckpointsSlruWrittenDesc,
+			prometheus.CounterValue,
+			slruwMetric,
+			"exporter",
+			instance.name,
+		)
+	}
 	srMetric := 0.0
 	if sr.Valid {
 		srMetric = float64(sr.Time.Unix())
@@ -390,29 +432,6 @@ func (p PGStatBGWriterCollector) Update(ctx context.Context, instance *instance,
 		"exporter",
 		instance.name,
 	)
-
-	// PostgreSQL 18+ checkpointer metrics
-	if numDone.Valid {
-		numDoneMetric := float64(numDone.Int64)
-		ch <- prometheus.MustNewConstMetric(
-			statCheckpointerNumDoneDesc,
-			prometheus.CounterValue,
-			numDoneMetric,
-			"exporter",
-			instance.name,
-		)
-	}
-
-	if slruWritten.Valid {
-		slruWrittenMetric := float64(slruWritten.Int64)
-		ch <- prometheus.MustNewConstMetric(
-			statCheckpointerSlruWrittenDesc,
-			prometheus.CounterValue,
-			slruWrittenMetric,
-			"exporter",
-			instance.name,
-		)
-	}
 
 	// TODO: analyze metrics below, why do we duplicate them?
 
@@ -430,6 +449,15 @@ func (p PGStatBGWriterCollector) Update(ctx context.Context, instance *instance,
 		"exporter",
 		instance.name,
 	)
+	if after18 {
+		ch <- prometheus.MustNewConstMetric(
+			statBGWriter["percona_checkpoints_done"],
+			prometheus.CounterValue,
+			cpdMetric,
+			"exporter",
+			instance.name,
+		)
+	}
 	ch <- prometheus.MustNewConstMetric(
 		statBGWriter["percona_checkpoint_write_time"],
 		prometheus.CounterValue,
@@ -486,6 +514,15 @@ func (p PGStatBGWriterCollector) Update(ctx context.Context, instance *instance,
 		"exporter",
 		instance.name,
 	)
+	if after18 {
+		ch <- prometheus.MustNewConstMetric(
+			statBGWriter["percona_slru_written"],
+			prometheus.CounterValue,
+			slruwMetric,
+			"exporter",
+			instance.name,
+		)
+	}
 	ch <- prometheus.MustNewConstMetric(
 		statBGWriter["percona_stats_reset"],
 		prometheus.CounterValue,
