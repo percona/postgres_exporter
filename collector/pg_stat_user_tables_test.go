@@ -30,7 +30,7 @@ func TestPGStatUserTablesCollector(t *testing.T) {
 	}
 	defer db.Close()
 
-	inst := &instance{db: db}
+	inst := &instance{db: db, version: pg18}
 
 	lastVacuumTime, err := time.Parse("2006-01-02Z", "2023-06-02Z")
 	if err != nil {
@@ -102,12 +102,12 @@ func TestPGStatUserTablesCollector(t *testing.T) {
 			13,
 			14,
 			15,
-			nil,
-			nil,
-			nil,
-			nil,
+			16,
+			17,
+			18,
+			19,
 		)
-	mock.ExpectQuery(sanitizeQuery(statUserTablesQueryPre18)).WillReturnRows(rows)
+	mock.ExpectQuery(sanitizeQuery(statUserTablesQueryPG18)).WillReturnRows(rows)
 	ch := make(chan prometheus.Metric)
 	go func() {
 		defer close(ch)
@@ -138,6 +138,11 @@ func TestPGStatUserTablesCollector(t *testing.T) {
 		{labels: labelMap{"datname": "postgres", "schemaname": "public", "relname": "a_table"}, metricType: dto.MetricType_COUNTER, value: 12},
 		{labels: labelMap{"datname": "postgres", "schemaname": "public", "relname": "a_table"}, metricType: dto.MetricType_COUNTER, value: 13},
 		{labels: labelMap{"datname": "postgres", "schemaname": "public", "relname": "a_table"}, metricType: dto.MetricType_COUNTER, value: 14},
+		{labels: labelMap{"datname": "postgres", "schemaname": "public", "relname": "a_table"}, metricType: dto.MetricType_GAUGE, value: 15},
+		{labels: labelMap{"datname": "postgres", "schemaname": "public", "relname": "a_table"}, metricType: dto.MetricType_COUNTER, value: 16},
+		{labels: labelMap{"datname": "postgres", "schemaname": "public", "relname": "a_table"}, metricType: dto.MetricType_COUNTER, value: 17},
+		{labels: labelMap{"datname": "postgres", "schemaname": "public", "relname": "a_table"}, metricType: dto.MetricType_COUNTER, value: 18},
+		{labels: labelMap{"datname": "postgres", "schemaname": "public", "relname": "a_table"}, metricType: dto.MetricType_COUNTER, value: 19},
 	}
 
 	convey.Convey("Metrics comparison", t, func() {
@@ -158,7 +163,7 @@ func TestPGStatUserTablesCollectorNullValues(t *testing.T) {
 	}
 	defer db.Close()
 
-	inst := &instance{db: db}
+	inst := &instance{db: db, version: pg18}
 
 	columns := []string{
 		"datname",
@@ -218,7 +223,7 @@ func TestPGStatUserTablesCollectorNullValues(t *testing.T) {
 			nil,
 			nil,
 		)
-	mock.ExpectQuery(sanitizeQuery(statUserTablesQueryPre18)).WillReturnRows(rows)
+	mock.ExpectQuery(sanitizeQuery(statUserTablesQueryPG18)).WillReturnRows(rows)
 	ch := make(chan prometheus.Metric)
 	go func() {
 		defer close(ch)
@@ -244,6 +249,11 @@ func TestPGStatUserTablesCollectorNullValues(t *testing.T) {
 		{labels: labelMap{"datname": "postgres", "schemaname": "unknown", "relname": "unknown"}, metricType: dto.MetricType_GAUGE, value: 0},
 		{labels: labelMap{"datname": "postgres", "schemaname": "unknown", "relname": "unknown"}, metricType: dto.MetricType_GAUGE, value: 0},
 		{labels: labelMap{"datname": "postgres", "schemaname": "unknown", "relname": "unknown"}, metricType: dto.MetricType_GAUGE, value: 0},
+		{labels: labelMap{"datname": "postgres", "schemaname": "unknown", "relname": "unknown"}, metricType: dto.MetricType_GAUGE, value: 0},
+		{labels: labelMap{"datname": "postgres", "schemaname": "unknown", "relname": "unknown"}, metricType: dto.MetricType_COUNTER, value: 0},
+		{labels: labelMap{"datname": "postgres", "schemaname": "unknown", "relname": "unknown"}, metricType: dto.MetricType_COUNTER, value: 0},
+		{labels: labelMap{"datname": "postgres", "schemaname": "unknown", "relname": "unknown"}, metricType: dto.MetricType_COUNTER, value: 0},
+		{labels: labelMap{"datname": "postgres", "schemaname": "unknown", "relname": "unknown"}, metricType: dto.MetricType_COUNTER, value: 0},
 		{labels: labelMap{"datname": "postgres", "schemaname": "unknown", "relname": "unknown"}, metricType: dto.MetricType_GAUGE, value: 0},
 		{labels: labelMap{"datname": "postgres", "schemaname": "unknown", "relname": "unknown"}, metricType: dto.MetricType_COUNTER, value: 0},
 		{labels: labelMap{"datname": "postgres", "schemaname": "unknown", "relname": "unknown"}, metricType: dto.MetricType_COUNTER, value: 0},
