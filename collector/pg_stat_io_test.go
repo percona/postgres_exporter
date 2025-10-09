@@ -33,9 +33,9 @@ func TestPGStatIOCollector(t *testing.T) {
 
 	inst := &instance{db: db, version: semver.MustParse("16.0.0")}
 
-	columns := []string{"backend_type", "io_object", "io_context",  "reads", "read_bytes", "read_time", "writes", "write_bytes", "write_time", "writebacks", "writeback_time", "extends", "extend_bytes", "extend_time", "hits", "evictions", "reueses", "fsyncs", "fsync_time"}
+	columns := []string{"backend_type", "io_object", "io_context", "reads", "read_bytes", "read_time", "writes", "write_bytes", "write_time", "writebacks", "writeback_time", "extends", "extend_bytes", "extend_time", "hits", "evictions", "reueses", "fsyncs", "fsync_time"}
 	rows := sqlmock.NewRows(columns).
-		AddRow("client backend", "relation", "normal", 100, nil, 50.5, 75 ,nil, 25.2, 10, 12.0, 7, nil, 11.0, 1 ,2 ,3, 4, 8.0 )
+		AddRow("client backend", "relation", "normal", 100, nil, 50.5, 75, nil, 25.2, 10, 12.0, 7, nil, 11.0, 1, 2, 3, 4, 8.0)
 	mock.ExpectQuery("SELECT.*backend_type.*FROM pg_stat_io").WillReturnRows(rows)
 
 	ch := make(chan prometheus.Metric)
@@ -48,7 +48,7 @@ func TestPGStatIOCollector(t *testing.T) {
 		}
 	}()
 
-	labels := labelMap{"backend_type": "client backend", "io_object": "relation", "io_context": "normal",}
+	labels := labelMap{"backend_type": "client backend", "io_object": "relation", "io_context": "normal"}
 	expected := []MetricResult{
 		{labels: labels, metricType: dto.MetricType_COUNTER, value: 100},
 		{labels: labels, metricType: dto.MetricType_COUNTER, value: 50.5},
@@ -100,7 +100,7 @@ func TestPGStatIOCollectorPostgreSQL18(t *testing.T) {
 		}
 	}()
 
-	labels := labelMap{"backend_type": "client backend", "io_object": "relation", "io_context": "normal",}
+	labels := labelMap{"backend_type": "client backend", "io_object": "relation", "io_context": "normal"}
 	expected := []MetricResult{
 		{labels: labels, metricType: dto.MetricType_COUNTER, value: 100},
 		{labels: labels, metricType: dto.MetricType_COUNTER, value: 50.5},
