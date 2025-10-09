@@ -508,33 +508,33 @@ func (c *PGStatUserTablesCollector) Update(ctx context.Context, instance *instan
 
 		if after18 {
 			// PostgreSQL 18+ vacuum/analyze timing metrics
-				ch <- prometheus.MustNewConstMetric(
-					statUserTablesTotalVacuumTime,
-					prometheus.CounterValue,
-					totalVacuumTime.Float64,
-					datnameLabel, schemanameLabel, relnameLabel,
-				)
+			ch <- prometheus.MustNewConstMetric(
+				statUserTablesTotalVacuumTime,
+				prometheus.CounterValue,
+				totalVacuumTime.Float64,
+				datnameLabel, schemanameLabel, relnameLabel,
+			)
 
-				ch <- prometheus.MustNewConstMetric(
-					statUserTablesTotalAutovacuumTime,
-					prometheus.CounterValue,
-					totalAutovacuumTime.Float64,
-					datnameLabel, schemanameLabel, relnameLabel,
-				)
+			ch <- prometheus.MustNewConstMetric(
+				statUserTablesTotalAutovacuumTime,
+				prometheus.CounterValue,
+				totalAutovacuumTime.Float64,
+				datnameLabel, schemanameLabel, relnameLabel,
+			)
 
-				ch <- prometheus.MustNewConstMetric(
-					statUserTablesTotalAnalyzeTime,
-					prometheus.CounterValue,
-					totalAnalyzeTime.Float64,
-					datnameLabel, schemanameLabel, relnameLabel,
-				)
+			ch <- prometheus.MustNewConstMetric(
+				statUserTablesTotalAnalyzeTime,
+				prometheus.CounterValue,
+				totalAnalyzeTime.Float64,
+				datnameLabel, schemanameLabel, relnameLabel,
+			)
 
-				ch <- prometheus.MustNewConstMetric(
-					statUserTablesTotalAutoanalyzeTime,
-					prometheus.CounterValue,
-					totalAutoanalyzeTime.Float64,
-					datnameLabel, schemanameLabel, relnameLabel,
-				)
+			ch <- prometheus.MustNewConstMetric(
+				statUserTablesTotalAutoanalyzeTime,
+				prometheus.CounterValue,
+				totalAutoanalyzeTime.Float64,
+				datnameLabel, schemanameLabel, relnameLabel,
+			)
 		}
 	}
 
