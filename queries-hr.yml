@@ -1,4 +1,5 @@
 pg_custom_replication_slots:
+  master: true
   query: |
     SELECT
       slot_name,
@@ -29,6 +30,7 @@ pg_custom_replication_slots:
         description: "Confirmed flush LSN in bytes for the replication slot."
 
 pg_custom_stat_wal_receiver:
+  master: true
   query: |
     SELECT
       status,
@@ -72,8 +74,8 @@ pg_custom_stat_wal_receiver:
 
 
 pg_custom_database_size_custom:
+  master: true
   query: "SELECT pg_database.datname, pg_database_size(pg_database.datname) as bytes FROM pg_database"
-  master: false
   cache_seconds: 30
   metrics:
     - datname:
@@ -85,6 +87,7 @@ pg_custom_database_size_custom:
 
 
 pg_custom_stat_replication:
+  master: true
   query: |
     SELECT
       pid,
@@ -139,6 +142,7 @@ pg_custom_stat_replication:
         description: "Synchronization state (e.g., async, sync)."
 
 pg_custom_stat_activity_walsender:
+  master: true
   query: |
     SELECT
       pid,
@@ -170,6 +174,7 @@ pg_custom_stat_activity_walsender:
         description: "Current state of the WAL sender process"
 
 pg_custom_stat_subscription:
+  master: true
   query: "SELECT subid, subname, pid, received_lsn, last_msg_send_time, last_msg_receipt_time FROM pg_stat_subscription;"
   metrics:
     - subid:
@@ -177,7 +182,7 @@ pg_custom_stat_subscription:
         description: "Subscription ID"
     - subname:
         usage: "LABEL"
-        description: "Subscription Name"    
+        description: "Subscription Name"
     - pid:
         usage: "GAUGE"
         description: "Process ID of subscription worker"
@@ -192,6 +197,7 @@ pg_custom_stat_subscription:
         description: "Last message receipt time"
 
 pg_custom_publication:
+  master: true
   query: "SELECT pubname, puballtables, pubinsert, pubupdate, pubdelete FROM pg_publication;"
   metrics:
     - pubname:
