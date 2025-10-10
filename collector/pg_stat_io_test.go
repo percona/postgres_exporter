@@ -155,7 +155,7 @@ func TestPGStatIOCollectorPrePostgreSQL16(t *testing.T) {
 		t.Errorf("There were unfulfilled expectations: %s", err)
 	}
 
-	for _ = range ch {
+	for range ch {
 		t.Error("Don't expect any metrics for PostgreSQL < 16")
 	}
 }
