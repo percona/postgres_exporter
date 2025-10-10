@@ -1,12 +1,10 @@
 ## [Unreleased]
 
 * [ENHANCEMENT] Add PostgreSQL 18 support:
-  * Add parallel worker activity metrics (`pg_stat_database_parallel_workers_to_launch`, `pg_stat_database_parallel_workers_launched`)
-  * Add vacuum/analyze timing metrics (`pg_stat_user_tables_total_vacuum_time`, `pg_stat_user_tables_total_autovacuum_time`, `pg_stat_user_tables_total_analyze_time`, `pg_stat_user_tables_total_autoanalyze_time`)
-  * Add enhanced checkpointer metrics (`pg_stat_bgwriter_checkpoints_done_total`, `pg_stat_bgwriter_slru_written_total`)
+  * Add parallel worker activity metrics
+  * Add vacuum/analyze timing metrics
+  * Add enhanced checkpointer metrics
   * Add `pg_stat_io` collector with byte statistics and WAL I/O activity tracking
-  * Add `pg_backend_stats` collector for per-backend I/O and WAL statistics
-  * Add enhanced `pg_backend_memory_contexts` collector with type and path columns
 * [ENHANCEMENT] Update CI tested PostgreSQL versions to include PostgreSQL 18
 
 ## 0.15.0 / 2023-10-27
