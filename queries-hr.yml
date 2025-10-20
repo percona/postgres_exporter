@@ -84,12 +84,22 @@ pg_custom_database_size_custom:
         description: "Disk space used by the database"
 
 pg_custom_replication_wal:
+  master: true
   query: |
     SELECT
-      pg_last_wal_receive_lsn() AS received_lsn,
+      CASE
+        WHEN pg_is_in_recovery() THEN pg_last_wal_receive_lsn()
+        ELSE pg_current_wal_lsn()
+      END AS received_lsn,
       pg_last_wal_replay_lsn() AS replayed_lsn,
-      pg_current_wal_lsn() AS current_lsn,
-      pg_current_wal_lsn() - pg_last_wal_replay_lsn() AS lag_bytes;
+      CASE
+        WHEN pg_is_in_recovery() THEN pg_last_wal_receive_lsn()
+        ELSE pg_current_wal_lsn()
+      END AS current_lsn,
+      CASE
+        WHEN pg_is_in_recovery() THEN pg_last_wal_receive_lsn() - pg_last_wal_replay_lsn()
+        ELSE pg_current_wal_lsn() - pg_last_wal_replay_lsn()
+      END AS lag_bytes
   metrics:
     - received_lsn:
         usage: "GAUGE"
