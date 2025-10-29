@@ -179,7 +179,7 @@ pg_custom_stat_activity_walsender:
     WHERE backend_type = 'walsender';
   metrics:
     - pid:
-        usage: "GAUGE"
+        usage: "LABEL"
         description: "Process ID of the WAL sender"
     - usename:
         usage: "LABEL"
