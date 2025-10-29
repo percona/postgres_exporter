@@ -84,25 +84,33 @@ pg_custom_database_size_custom:
         description: "Disk space used by the database"
 
 pg_custom_replication_wal:
+  master: true
   query: |
     SELECT
-      pg_last_wal_receive_lsn() AS received_lsn,
-      pg_last_wal_replay_lsn() AS replayed_lsn,
-      pg_current_wal_lsn() AS current_lsn,
-      pg_current_wal_lsn() - pg_last_wal_replay_lsn() AS lag_bytes;
+      CASE WHEN pg_is_in_recovery() THEN 'replica' ELSE 'primary' END AS node_type,
+      CASE WHEN pg_is_in_recovery() THEN pg_last_wal_receive_lsn() ELSE NULL END AS received_lsn,
+      CASE WHEN pg_is_in_recovery() THEN pg_last_wal_replay_lsn() ELSE NULL END AS replayed_lsn,
+      CASE WHEN pg_is_in_recovery() THEN NULL ELSE pg_current_wal_lsn() END AS current_lsn,
+      CASE
+        WHEN pg_is_in_recovery() THEN pg_last_wal_receive_lsn() - pg_last_wal_replay_lsn()
+        ELSE NULL
+      END AS lag_bytes
   metrics:
+    - node_type:
+        usage: "LABEL"
+        description: "Type of node (primary or replica)."
     - received_lsn:
         usage: "GAUGE"
-        description: "Last WAL location received by the standby server."
+        description: "Last WAL location received by the standby server (replica only)."
     - replayed_lsn:
         usage: "GAUGE"
-        description: "Last WAL location replayed by the standby server."
+        description: "Last WAL location replayed by the standby server (replica only)."
     - current_lsn:
         usage: "GAUGE"
-        description: "Current WAL location on the primary server."
+        description: "Current WAL location on the primary server (primary only)."
     - lag_bytes:
         usage: "GAUGE"
-        description: "Current WAL replication lag in bytes."
+        description: "Current WAL replication lag in bytes (replica only)."
 
 pg_custom_stat_replication:
   query: |
