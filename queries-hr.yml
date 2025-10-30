@@ -175,7 +175,7 @@ pg_custom_stat_activity_walsender:
 
 pg_custom_stat_subscription:
   master: true
-  query: "SELECT subid, subname, pid, received_lsn, last_msg_send_time, last_msg_receipt_time FROM pg_stat_subscription;"
+  query: "SELECT subid, subname, pid, received_lsn::pg_lsn - '0/0'::pg_lsn, last_msg_send_time, last_msg_receipt_time FROM pg_stat_subscription;"
   metrics:
     - subid:
         usage: "LABEL"
@@ -188,7 +188,7 @@ pg_custom_stat_subscription:
         description: "Process ID of subscription worker"
     - received_lsn:
         usage: "GAUGE"
-        description: "Last received LSN"
+        description: "Last received LSN in bytes"
     - last_msg_send_time:
         usage: "GAUGE"
         description: "Last message sent time"
