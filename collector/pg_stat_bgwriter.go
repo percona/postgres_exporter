@@ -216,31 +216,21 @@ const statBGWriterQueryPost17 = `SELECT
 		,stats_reset
 	FROM pg_stat_bgwriter;`
 
-const statCheckpointerQueryPre18 = `SELECT
+const statCheckpointerQuery = `SELECT
 		num_timed
 		,num_requested
-		,NULL::bigint as num_done
+		CASE WHEN current_setting('server_version_num')::int >= 180000
+			 THEN COALESCE(num_done, 0)
+			 ELSE 0 END as num_done,
 		,restartpoints_timed
 		,restartpoints_req
 		,restartpoints_done
 		,write_time
 		,sync_time
 		,buffers_written
-		,NULL::bigint as slru_written
-		,stats_reset
-	FROM pg_stat_checkpointer;`
-
-const statCheckpointerQuery18Plus = `SELECT
-		num_timed
-		,num_requested
-		,num_done
-		,restartpoints_timed
-		,restartpoints_req
-		,restartpoints_done
-		,write_time
-		,sync_time
-		,buffers_written
-		,slru_written
+		,CASE WHEN current_setting('server_version_num')::int >= 180000
+			 THEN COALESCE(slru_written, 0)
+			 ELSE 0 END as slru_written,
 		,stats_reset
 	FROM pg_stat_checkpointer;`
 
@@ -263,13 +253,7 @@ func (p PGStatBGWriterCollector) Update(ctx context.Context, instance *instance,
 		var rpt, rpr, rpd sql.NullInt64
 		var csr sql.NullTime
 
-		// Use version-specific checkpointer query for PostgreSQL 18+
-		checkpointerQuery := statCheckpointerQueryPre18
-		if after18 {
-			checkpointerQuery = statCheckpointerQuery18Plus
-		}
-
-		row = db.QueryRowContext(ctx, checkpointerQuery)
+		row = db.QueryRowContext(ctx, statCheckpointerQuery)
 		err = row.Scan(&cpt, &cpr, &cpd, &rpt, &rpr, &rpd, &cpwt, &cpst, &bcp, &slruw, &csr)
 		if err != nil {
 			return err

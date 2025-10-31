@@ -226,7 +226,7 @@ var (
 		prometheus.Labels{},
 	)
 
-	statDatabaseQueryPrePG18 = `
+	statDatabaseQuery = `
 		SELECT
 			datid
 			,datname
@@ -247,34 +247,12 @@ var (
 			,blk_read_time
 			,blk_write_time
 			,stats_reset
-			,NULL::bigint as parallel_workers_to_launch
-			,NULL::bigint as parallel_workers_launched
-		FROM pg_stat_database;
-	`
-
-	statDatabaseQueryPG18 = `
-		SELECT
-			datid
-			,datname
-			,numbackends
-			,xact_commit
-			,xact_rollback
-			,blks_read
-			,blks_hit
-			,tup_returned
-			,tup_fetched
-			,tup_inserted
-			,tup_updated
-			,tup_deleted
-			,conflicts
-			,temp_files
-			,temp_bytes
-			,deadlocks
-			,blk_read_time
-			,blk_write_time
-			,stats_reset
-			,parallel_workers_to_launch
-			,parallel_workers_launched
+			CASE WHEN current_setting('server_version_num')::int >= 180000
+				THEN parallel_workers_to_launch
+				ELSE NULL END as parallel_workers_to_launch
+			CASE WHEN current_setting('server_version_num')::int >= 180000
+				THEN parallel_workers_launched
+				ELSE NULL END as parallel_workers_launched
 		FROM pg_stat_database;
 	`
 )
@@ -283,13 +261,8 @@ func (c *PGStatDatabaseCollector) Update(ctx context.Context, instance *instance
 	db := instance.getDB()
 
 	after18 := instance.version.GTE(semver.Version{Major: 18})
-	// Use version-specific query for PostgreSQL 18+
-	query := statDatabaseQueryPrePG18
-	if after18 {
-		query = statDatabaseQueryPG18
-	}
 
-	rows, err := db.QueryContext(ctx, query)
+	rows, err := db.QueryContext(ctx, statDatabaseQuery)
 	if err != nil {
 		return err
 	}
@@ -410,7 +383,7 @@ func (c *PGStatDatabaseCollector) Update(ctx context.Context, instance *instance
 		}
 
 		if after18 {
-			if !parallelWorkersToLaunch.Valid && after18 {
+			if !parallelWorkersToLaunch.Valid {
 				level.Debug(c.log).Log("msg", "Skipping collecting metric because it has no parallel_workers_to_launch")
 				continue
 			}
