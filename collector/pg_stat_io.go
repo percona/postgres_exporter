@@ -134,53 +134,33 @@ var (
 		prometheus.Labels{},
 	)
 
-	// PostgreSQL 18+ query with byte statistics and WAL I/O
-	StatIOQuery18Plus = `
+	statIOQuery = `
 		SELECT
 			backend_type,
 			io_object,
 			io_context,
 			reads,
-			read_bytes,
+			CASE WHEN current_setting('server_version_num')::int >= 180000
+				THEN read_bytes
+				ELSE NULL END as read_bytes,
 			read_time,
 			writes,
-			write_bytes,
+			CASE WHEN current_setting('server_version_num')::int >= 180000
+				THEN write_bytes
+				ELSE NULL END as write_bytes,
 			write_time,
 			writebacks,
 			writeback_time,
 			extends,
-			extend_bytes,
+			CASE WHEN current_setting('server_version_num')::int >= 180000
+				THEN extend_bytes
+				ELSE NULL END as extend_bytes,
 			extend_time,
 			hits,
 			evictions,
 			reueses,
 			fsyncs
 			fsync_time,
-		FROM pg_stat_io
-	`
-
-	// Pre-PostgreSQL 18 query without byte statistics
-	StatIOQueryPre18 = `
-		SELECT
-			backend_type,
-			io_object,
-			io_context,
-			reads,
-			NULL::bigint as read_bytes,
-			read_time,
-			writes,
-			NULL::bigint as write_bytes,
-			write_time,
-			writebacks,
-			writeback_time,
-			extends,
-			NULL::numeric as extend_bytes,
-			extend_time,
-			hits,
-			NULL::bigint as evictions,
-			reueses,
-			fsyncs
-			fsync_time
 		FROM pg_stat_io
 	`
 )
@@ -194,13 +174,8 @@ func (c *PGStatIOCollector) Update(ctx context.Context, instance *instance, ch c
 	db := instance.getDB()
 
 	after18 := instance.version.GTE(semver.Version{Major: 18})
-	// Use version-specific query for PostgreSQL 18+
-	query := StatIOQueryPre18
-	if after18 {
-		query = StatIOQuery18Plus
-	}
 
-	rows, err := db.QueryContext(ctx, query)
+	rows, err := db.QueryContext(ctx, statIOQuery)
 	if err != nil {
 		return err
 	}
