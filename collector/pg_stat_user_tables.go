@@ -208,16 +208,16 @@ var (
 		pg_total_relation_size(relid) as total_size,
 		CASE WHEN current_setting('server_version_num')::int >= 180000
 			 THEN total_vacuum_time
-			 ELSE NULL precision END as total_vacuum_time,
+			 ELSE NULL END as total_vacuum_time,
 		CASE WHEN current_setting('server_version_num')::int >= 180000
 			 THEN total_autovacuum_time
-			 ELSE NULL precision END as total_autovacuum_time,
+			 ELSE NULL END as total_autovacuum_time,
 		CASE WHEN current_setting('server_version_num')::int >= 180000
 			 THEN total_analyze_time
-			 ELSE NULL precision END as total_analyze_time,
+			 ELSE NULL END as total_analyze_time,
 		CASE WHEN current_setting('server_version_num')::int >= 180000
 			 THEN total_autoanalyze_time
-			 ELSE NULL precision END as total_autoanalyze_time
+			 ELSE NULL END as total_autoanalyze_time
 	FROM
 		pg_stat_user_tables`
 )
@@ -480,38 +480,49 @@ func (c *PGStatUserTablesCollector) Update(ctx context.Context, instance *instan
 
 		if after18 {
 			// PostgreSQL 18+ vacuum/analyze timing metrics
+			totalVacuumTimeValue := 0.0
 			if totalVacuumTime.Valid {
-				ch <- prometheus.MustNewConstMetric(
-					statUserTablesTotalVacuumTime,
-					prometheus.CounterValue,
-					totalVacuumTime.Float64,
-					datnameLabel, schemanameLabel, relnameLabel,
-				)
+				totalVacuumTimeValue = totalVacuumTime.Float64
 			}
+			ch <- prometheus.MustNewConstMetric(
+				statUserTablesTotalVacuumTime,
+				prometheus.CounterValue,
+				totalVacuumTimeValue,
+				datnameLabel, schemanameLabel, relnameLabel,
+			)
+
+			totalAutovacuumTimeValue := 0.0
 			if totalAutovacuumTime.Valid {
-				ch <- prometheus.MustNewConstMetric(
-					statUserTablesTotalAutovacuumTime,
-					prometheus.CounterValue,
-					totalAutovacuumTime.Float64,
-					datnameLabel, schemanameLabel, relnameLabel,
-				)
+				totalAutovacuumTimeValue = totalAutovacuumTime.Float64
 			}
+			ch <- prometheus.MustNewConstMetric(
+				statUserTablesTotalAutovacuumTime,
+				prometheus.CounterValue,
+				totalAutovacuumTimeValue,
+				datnameLabel, schemanameLabel, relnameLabel,
+			)
+
+			totalAnalyzeTimeValue := 0.0
 			if totalAnalyzeTime.Valid {
-				ch <- prometheus.MustNewConstMetric(
-					statUserTablesTotalAnalyzeTime,
-					prometheus.CounterValue,
-					totalAnalyzeTime.Float64,
-					datnameLabel, schemanameLabel, relnameLabel,
-				)
+				totalAnalyzeTimeValue = totalAnalyzeTime.Float64
 			}
+			ch <- prometheus.MustNewConstMetric(
+				statUserTablesTotalAnalyzeTime,
+				prometheus.CounterValue,
+				totalAnalyzeTimeValue,
+				datnameLabel, schemanameLabel, relnameLabel,
+			)
+
+			totalAutoanalyzeTimeValue := 0.0
 			if totalAutoanalyzeTime.Valid {
-				ch <- prometheus.MustNewConstMetric(
-					statUserTablesTotalAutoanalyzeTime,
-					prometheus.CounterValue,
-					totalAutoanalyzeTime.Float64,
-					datnameLabel, schemanameLabel, relnameLabel,
-				)
+				totalAutoanalyzeTimeValue = totalAutoanalyzeTime.Float64
 			}
+			ch <- prometheus.MustNewConstMetric(
+				statUserTablesTotalAutoanalyzeTime,
+				prometheus.CounterValue,
+				totalAutoanalyzeTimeValue,
+				datnameLabel, schemanameLabel, relnameLabel,
+			)
 		}
 	}
 
