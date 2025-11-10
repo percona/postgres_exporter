@@ -219,9 +219,9 @@ const statBGWriterQueryPost17 = `SELECT
 const statCheckpointerQuery = `SELECT
 		num_timed
 		,num_requested
-		CASE WHEN current_setting('server_version_num')::int >= 180000
+		,CASE WHEN current_setting('server_version_num')::int >= 180000
 			 THEN COALESCE(num_done, 0)
-			 ELSE 0 END as num_done,
+			 ELSE 0 END as num_done
 		,restartpoints_timed
 		,restartpoints_req
 		,restartpoints_done
@@ -230,7 +230,7 @@ const statCheckpointerQuery = `SELECT
 		,buffers_written
 		,CASE WHEN current_setting('server_version_num')::int >= 180000
 			 THEN COALESCE(slru_written, 0)
-			 ELSE 0 END as slru_written,
+			 ELSE 0 END as slru_written
 		,stats_reset
 	FROM pg_stat_checkpointer;`
 
