@@ -247,10 +247,10 @@ var (
 			,blk_read_time
 			,blk_write_time
 			,stats_reset
-			CASE WHEN current_setting('server_version_num')::int >= 180000
+			,CASE WHEN current_setting('server_version_num')::int >= 180000
 				THEN parallel_workers_to_launch
 				ELSE NULL END as parallel_workers_to_launch
-			CASE WHEN current_setting('server_version_num')::int >= 180000
+			,CASE WHEN current_setting('server_version_num')::int >= 180000
 				THEN parallel_workers_launched
 				ELSE NULL END as parallel_workers_launched
 		FROM pg_stat_database;
