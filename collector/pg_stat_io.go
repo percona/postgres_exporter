@@ -159,8 +159,7 @@ var (
 				reueses,
 				fsyncs,
 				fsync_time
-			FROM pg_stat_io, server_version
-	`
+			FROM pg_stat_io, server_version;`
 )
 
 func (c *PGStatIOCollector) Update(ctx context.Context, instance *instance, ch chan<- prometheus.Metric) error {

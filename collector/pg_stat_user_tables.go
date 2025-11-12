@@ -215,8 +215,7 @@ var (
 			CASE WHEN server_version.ver >= 180000 THEN total_analyze_time ELSE NULL END as total_analyze_time,
 			CASE WHEN server_version.ver >= 180000 THEN total_autoanalyze_time ELSE NULL END as total_autoanalyze_time
 		FROM
-			pg_stat_user_tables, server_version
-	`
+			pg_stat_user_tables, server_version;`
 )
 
 func (c *PGStatUserTablesCollector) Update(ctx context.Context, instance *instance, ch chan<- prometheus.Metric) error {

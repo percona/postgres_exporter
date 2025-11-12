@@ -252,8 +252,7 @@ var (
 			stats_reset,
 			CASE WHEN ver >= 180000 THEN parallel_workers_to_launch ELSE NULL END as parallel_workers_to_launch,
 			CASE WHEN ver >= 180000 THEN parallel_workers_launched ELSE NULL END as parallel_workers_launched
-		FROM pg_stat_database, server_version;
-	`
+		FROM pg_stat_database, server_version;`
 )
 
 func (c *PGStatDatabaseCollector) Update(ctx context.Context, instance *instance, ch chan<- prometheus.Metric) error {
