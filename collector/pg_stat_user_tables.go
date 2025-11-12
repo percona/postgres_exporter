@@ -182,50 +182,47 @@ var (
 		prometheus.Labels{},
 	)
 
-	statUserTablesQuery = `SELECT
-		current_database() datname,
-		schemaname,
-		relname,
-		seq_scan,
-		seq_tup_read,
-		idx_scan,
-		idx_tup_fetch,
-		n_tup_ins,
-		n_tup_upd,
-		n_tup_del,
-		n_tup_hot_upd,
-		n_live_tup,
-		n_dead_tup,
-		n_mod_since_analyze,
-		COALESCE(last_vacuum, '1970-01-01Z') as last_vacuum,
-		COALESCE(last_autovacuum, '1970-01-01Z') as last_autovacuum,
-		COALESCE(last_analyze, '1970-01-01Z') as last_analyze,
-		COALESCE(last_autoanalyze, '1970-01-01Z') as last_autoanalyze,
-		vacuum_count,
-		autovacuum_count,
-		analyze_count,
-		autoanalyze_count,
-		pg_total_relation_size(relid) as total_size,
-		CASE WHEN current_setting('server_version_num')::int >= 180000
-			 THEN total_vacuum_time
-			 ELSE NULL END as total_vacuum_time,
-		CASE WHEN current_setting('server_version_num')::int >= 180000
-			 THEN total_autovacuum_time
-			 ELSE NULL END as total_autovacuum_time,
-		CASE WHEN current_setting('server_version_num')::int >= 180000
-			 THEN total_analyze_time
-			 ELSE NULL END as total_analyze_time,
-		CASE WHEN current_setting('server_version_num')::int >= 180000
-			 THEN total_autoanalyze_time
-			 ELSE NULL END as total_autoanalyze_time
-	FROM
-		pg_stat_user_tables`
+	statUserTablesQuery = `
+		WITH server_version AS (
+			SELECT current_setting('server_version_num')::int AS ver
+		)
+		SELECT
+			current_database() datname,
+			schemaname,
+			relname,
+			seq_scan,
+			seq_tup_read,
+			idx_scan,
+			idx_tup_fetch,
+			n_tup_ins,
+			n_tup_upd,
+			n_tup_del,
+			n_tup_hot_upd,
+			n_live_tup,
+			n_dead_tup,
+			n_mod_since_analyze,
+			COALESCE(last_vacuum, '1970-01-01Z') as last_vacuum,
+			COALESCE(last_autovacuum, '1970-01-01Z') as last_autovacuum,
+			COALESCE(last_analyze, '1970-01-01Z') as last_analyze,
+			COALESCE(last_autoanalyze, '1970-01-01Z') as last_autoanalyze,
+			vacuum_count,
+			autovacuum_count,
+			analyze_count,
+			autoanalyze_count,
+			pg_total_relation_size(relid) as total_size,
+			CASE WHEN server_version.ver >= 180000 THEN total_vacuum_time ELSE NULL END as total_vacuum_time,
+			CASE WHEN server_version.ver >= 180000 THEN total_autovacuum_time ELSE NULL END as total_autovacuum_time,
+			CASE WHEN server_version.ver >= 180000 THEN total_analyze_time ELSE NULL END as total_analyze_time,
+			CASE WHEN server_version.ver >= 180000 THEN total_autoanalyze_time ELSE NULL END as total_autoanalyze_time
+		FROM
+			pg_stat_user_tables, server_version
+	`
 )
 
 func (c *PGStatUserTablesCollector) Update(ctx context.Context, instance *instance, ch chan<- prometheus.Metric) error {
 	db := instance.getDB()
 
-	after18 := instance.version.GTE(semver.Version{Major: 18})
+	v18plus := instance.version.GTE(semver.Version{Major: 18})
 
 	rows, err := db.QueryContext(ctx, statUserTablesQuery)
 
@@ -478,7 +475,7 @@ func (c *PGStatUserTablesCollector) Update(ctx context.Context, instance *instan
 			datnameLabel, schemanameLabel, relnameLabel,
 		)
 
-		if after18 {
+		if v18plus {
 			// PostgreSQL 18+ vacuum/analyze timing metrics
 			totalVacuumTimeValue := 0.0
 			if totalVacuumTime.Valid {

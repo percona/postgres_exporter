@@ -217,21 +217,22 @@ const statBGWriterQueryPost17 = `SELECT
 	FROM pg_stat_bgwriter;`
 
 const statCheckpointerQuery = `SELECT
-		num_timed
-		,num_requested
-		,CASE WHEN current_setting('server_version_num')::int >= 180000
-			 THEN COALESCE(num_done, 0)
-			 ELSE 0 END as num_done
-		,restartpoints_timed
-		,restartpoints_req
-		,restartpoints_done
-		,write_time
-		,sync_time
-		,buffers_written
-		,CASE WHEN current_setting('server_version_num')::int >= 180000
-			 THEN COALESCE(slru_written, 0)
-			 ELSE 0 END as slru_written
-		,stats_reset
+		WITH server_version AS (
+			SELECT current_setting('server_version_num')::int AS ver
+		)
+		SELECT
+			num_timed,
+			num_requested,
+			CASE WHEN ver >= 180000 THEN COALESCE(num_done, 0) ELSE 0 END as num_done,
+			restartpoints_timed,
+			restartpoints_req,
+			restartpoints_done,
+			write_time,
+			sync_time,
+			buffers_written,
+			CASE WHEN ver >= 180000 THEN COALESCE(slru_written, 0) ELSE 0 END as slru_written,
+			stats_reset
+		FROM pg_stat_checkpointer, server_version
 	FROM pg_stat_checkpointer;`
 
 func (p PGStatBGWriterCollector) Update(ctx context.Context, instance *instance, ch chan<- prometheus.Metric) error {
@@ -241,7 +242,7 @@ func (p PGStatBGWriterCollector) Update(ctx context.Context, instance *instance,
 	var cpwt, cpst sql.NullFloat64
 	var sr sql.NullTime
 
-	after18 := instance.version.GTE(semver.Version{Major: 18})
+	v18plus := instance.version.GTE(semver.Version{Major: 18})
 
 	if instance.version.GE(semver.MustParse("17.0.0")) {
 		row := db.QueryRowContext(ctx,
@@ -291,7 +292,7 @@ func (p PGStatBGWriterCollector) Update(ctx context.Context, instance *instance,
 	)
 
 	cpdMetric := 0.0
-	if after18 {
+	if v18plus {
 		if cpd.Valid {
 			cpdMetric = float64(cpd.Int64)
 		}
@@ -393,7 +394,7 @@ func (p PGStatBGWriterCollector) Update(ctx context.Context, instance *instance,
 		instance.name,
 	)
 	slruwMetric := 0.0
-	if after18 {
+	if v18plus {
 		if slruw.Valid {
 			slruwMetric = float64(slruw.Int64)
 		}
@@ -433,7 +434,7 @@ func (p PGStatBGWriterCollector) Update(ctx context.Context, instance *instance,
 		"exporter",
 		instance.name,
 	)
-	if after18 {
+	if v18plus {
 		ch <- prometheus.MustNewConstMetric(
 			statBGWriter["percona_checkpoints_done"],
 			prometheus.CounterValue,
@@ -498,7 +499,7 @@ func (p PGStatBGWriterCollector) Update(ctx context.Context, instance *instance,
 		"exporter",
 		instance.name,
 	)
-	if after18 {
+	if v18plus {
 		ch <- prometheus.MustNewConstMetric(
 			statBGWriter["percona_slru_written"],
 			prometheus.CounterValue,
