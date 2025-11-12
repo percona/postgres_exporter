@@ -232,8 +232,7 @@ const statCheckpointerQuery = `SELECT
 			buffers_written,
 			CASE WHEN ver >= 180000 THEN COALESCE(slru_written, 0) ELSE 0 END as slru_written,
 			stats_reset
-		FROM pg_stat_checkpointer, server_version
-	FROM pg_stat_checkpointer;`
+		FROM pg_stat_checkpointer, server_version;`
 
 func (p PGStatBGWriterCollector) Update(ctx context.Context, instance *instance, ch chan<- prometheus.Metric) error {
 	db := instance.getDB()
