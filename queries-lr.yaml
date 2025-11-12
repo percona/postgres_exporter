@@ -1,5 +1,8 @@
 pg_stat_user_tables:
   query: |
+    WITH server_version AS (
+      SELECT current_setting('server_version_num')::int AS ver
+    )
     SELECT
       current_database() datname,
       schemaname,
@@ -23,20 +26,12 @@ pg_stat_user_tables:
       autovacuum_count,
       analyze_count,
       autoanalyze_count,
-      CASE WHEN current_setting('server_version_num')::int >= 180000
-           THEN COALESCE(total_vacuum_time, 0)
-           ELSE 0 END as total_vacuum_time,
-      CASE WHEN current_setting('server_version_num')::int >= 180000
-           THEN COALESCE(total_autovacuum_time, 0)
-           ELSE 0 END as total_autovacuum_time,
-      CASE WHEN current_setting('server_version_num')::int >= 180000
-           THEN COALESCE(total_analyze_time, 0)
-           ELSE 0 END as total_analyze_time,
-      CASE WHEN current_setting('server_version_num')::int >= 180000
-           THEN COALESCE(total_autoanalyze_time, 0)
-           ELSE 0 END as total_autoanalyze_time
+      CASE WHEN server_version.ver >= 180000 THEN COALESCE(total_vacuum_time, 0) ELSE 0 END as total_vacuum_time,
+      CASE WHEN server_version.ver >= 180000 THEN COALESCE(total_autovacuum_time, 0) ELSE 0 END as total_autovacuum_time,
+      CASE WHEN server_version.ver >= 180000 THEN COALESCE(total_analyze_time, 0) ELSE 0 END as total_analyze_time,
+      CASE WHEN server_version.ver >= 180000 THEN COALESCE(total_autoanalyze_time, 0) ELSE 0 END as total_autoanalyze_time
     FROM
-      pg_stat_user_tables
+      pg_stat_user_tables, server_version
   metrics:
     - datname:
         usage: "LABEL"

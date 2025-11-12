@@ -227,40 +227,39 @@ var (
 	)
 
 	statDatabaseQuery = `
+		WITH server_version AS (
+			SELECT current_setting('server_version_num')::int AS ver
+		)
 		SELECT
-			datid
-			,datname
-			,numbackends
-			,xact_commit
-			,xact_rollback
-			,blks_read
-			,blks_hit
-			,tup_returned
-			,tup_fetched
-			,tup_inserted
-			,tup_updated
-			,tup_deleted
-			,conflicts
-			,temp_files
-			,temp_bytes
-			,deadlocks
-			,blk_read_time
-			,blk_write_time
-			,stats_reset
-			,CASE WHEN current_setting('server_version_num')::int >= 180000
-				THEN parallel_workers_to_launch
-				ELSE NULL END as parallel_workers_to_launch
-			,CASE WHEN current_setting('server_version_num')::int >= 180000
-				THEN parallel_workers_launched
-				ELSE NULL END as parallel_workers_launched
-		FROM pg_stat_database;
+			datid,
+			datname,
+			numbackends,
+			xact_commit,
+			xact_rollback,
+			blks_read,
+			blks_hit,
+			tup_returned,
+			tup_fetched,
+			tup_inserted,
+			tup_updated,
+			tup_deleted,
+			conflicts,
+			temp_files,
+			temp_bytes,
+			deadlocks,
+			blk_read_time,
+			blk_write_time,
+			stats_reset,
+			CASE WHEN ver >= 180000 THEN parallel_workers_to_launch ELSE NULL END as parallel_workers_to_launch,
+			CASE WHEN ver >= 180000 THEN parallel_workers_launched ELSE NULL END as parallel_workers_launched
+		FROM pg_stat_database, server_version;
 	`
 )
 
 func (c *PGStatDatabaseCollector) Update(ctx context.Context, instance *instance, ch chan<- prometheus.Metric) error {
 	db := instance.getDB()
 
-	after18 := instance.version.GTE(semver.Version{Major: 18})
+	v18plus := instance.version.GTE(semver.Version{Major: 18})
 
 	rows, err := db.QueryContext(ctx, statDatabaseQuery)
 	if err != nil {
@@ -382,7 +381,7 @@ func (c *PGStatDatabaseCollector) Update(ctx context.Context, instance *instance
 			statsResetMetric = float64(statsReset.Time.Unix())
 		}
 
-		if after18 {
+		if v18plus {
 			if !parallelWorkersToLaunch.Valid {
 				level.Debug(c.log).Log("msg", "Skipping collecting metric because it has no parallel_workers_to_launch")
 				continue
@@ -515,7 +514,7 @@ func (c *PGStatDatabaseCollector) Update(ctx context.Context, instance *instance
 			labels...,
 		)
 
-		if after18 {
+		if v18plus {
 			ch <- prometheus.MustNewConstMetric(
 				statDatabaseParallelWorkersToLaunch,
 				prometheus.CounterValue,
