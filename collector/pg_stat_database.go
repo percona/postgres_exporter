@@ -17,6 +17,7 @@ import (
 	"context"
 	"database/sql"
 
+	"github.com/blang/semver/v4"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
@@ -206,37 +207,60 @@ var (
 		[]string{"datid", "datname"},
 		prometheus.Labels{},
 	)
+	statDatabaseParallelWorkersToLaunch = prometheus.NewDesc(prometheus.BuildFQName(
+		namespace,
+		statDatabaseSubsystem,
+		"parallel_workers_to_launch",
+	),
+		"Number of parallel workers to launch (PostgreSQL 18+)",
+		[]string{"datid", "datname"},
+		prometheus.Labels{},
+	)
+	statDatabaseParallelWorkersLaunched = prometheus.NewDesc(prometheus.BuildFQName(
+		namespace,
+		statDatabaseSubsystem,
+		"parallel_workers_launched",
+	),
+		"Number of parallel workers launched (PostgreSQL 18+)",
+		[]string{"datid", "datname"},
+		prometheus.Labels{},
+	)
 
 	statDatabaseQuery = `
+		WITH server_version AS (
+			SELECT current_setting('server_version_num')::int AS ver
+		)
 		SELECT
-			datid
-			,datname
-			,numbackends
-			,xact_commit
-			,xact_rollback
-			,blks_read
-			,blks_hit
-			,tup_returned
-			,tup_fetched
-			,tup_inserted
-			,tup_updated
-			,tup_deleted
-			,conflicts
-			,temp_files
-			,temp_bytes
-			,deadlocks
-			,blk_read_time
-			,blk_write_time
-			,stats_reset
-		FROM pg_stat_database;
-	`
+			datid,
+			datname,
+			numbackends,
+			xact_commit,
+			xact_rollback,
+			blks_read,
+			blks_hit,
+			tup_returned,
+			tup_fetched,
+			tup_inserted,
+			tup_updated,
+			tup_deleted,
+			conflicts,
+			temp_files,
+			temp_bytes,
+			deadlocks,
+			blk_read_time,
+			blk_write_time,
+			stats_reset,
+			CASE WHEN ver >= 180000 THEN parallel_workers_to_launch ELSE NULL END as parallel_workers_to_launch,
+			CASE WHEN ver >= 180000 THEN parallel_workers_launched ELSE NULL END as parallel_workers_launched
+		FROM pg_stat_database, server_version;`
 )
 
 func (c *PGStatDatabaseCollector) Update(ctx context.Context, instance *instance, ch chan<- prometheus.Metric) error {
 	db := instance.getDB()
-	rows, err := db.QueryContext(ctx,
-		statDatabaseQuery,
-	)
+
+	v18plus := instance.version.GTE(semver.Version{Major: 18})
+
+	rows, err := db.QueryContext(ctx, statDatabaseQuery)
 	if err != nil {
 		return err
 	}
@@ -246,6 +270,7 @@ func (c *PGStatDatabaseCollector) Update(ctx context.Context, instance *instance
 		var datid, datname sql.NullString
 		var numBackends, xactCommit, xactRollback, blksRead, blksHit, tupReturned, tupFetched, tupInserted, tupUpdated, tupDeleted, conflicts, tempFiles, tempBytes, deadlocks, blkReadTime, blkWriteTime sql.NullFloat64
 		var statsReset sql.NullTime
+		var parallelWorkersToLaunch, parallelWorkersLaunched sql.NullFloat64
 
 		err := rows.Scan(
 			&datid,
@@ -267,6 +292,8 @@ func (c *PGStatDatabaseCollector) Update(ctx context.Context, instance *instance
 			&blkReadTime,
 			&blkWriteTime,
 			&statsReset,
+			&parallelWorkersToLaunch,
+			&parallelWorkersLaunched,
 		)
 		if err != nil {
 			return err
@@ -351,6 +378,18 @@ func (c *PGStatDatabaseCollector) Update(ctx context.Context, instance *instance
 		}
 		if statsReset.Valid {
 			statsResetMetric = float64(statsReset.Time.Unix())
+		}
+
+		if v18plus {
+			if !parallelWorkersToLaunch.Valid {
+				level.Debug(c.log).Log("msg", "Skipping collecting metric because it has no parallel_workers_to_launch")
+				continue
+			}
+
+			if !parallelWorkersLaunched.Valid {
+				level.Debug(c.log).Log("msg", "Skipping collecting metric because it has no parallel_workers_launched")
+				continue
+			}
 		}
 
 		labels := []string{datid.String, datname.String}
@@ -473,6 +512,22 @@ func (c *PGStatDatabaseCollector) Update(ctx context.Context, instance *instance
 			statsResetMetric,
 			labels...,
 		)
+
+		if v18plus {
+			ch <- prometheus.MustNewConstMetric(
+				statDatabaseParallelWorkersToLaunch,
+				prometheus.CounterValue,
+				parallelWorkersToLaunch.Float64,
+				labels...,
+			)
+
+			ch <- prometheus.MustNewConstMetric(
+				statDatabaseParallelWorkersLaunched,
+				prometheus.CounterValue,
+				parallelWorkersLaunched.Float64,
+				labels...,
+			)
+		}
 	}
 	return nil
 }
