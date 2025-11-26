@@ -39,11 +39,11 @@ func TestLoadBadConfigs(t *testing.T) {
 	}{
 		{
 			input: "testdata/config-bad-auth-module.yaml",
-			want:  "Error parsing config file \"testdata/config-bad-auth-module.yaml\": yaml: unmarshal errors:\n  line 3: field pretendauth not found in type config.AuthModule",
+			want:  "error parsing config file \"testdata/config-bad-auth-module.yaml\": yaml: unmarshal errors:\n  line 3: field pretendauth not found in type config.AuthModule",
 		},
 		{
 			input: "testdata/config-bad-extra-field.yaml",
-			want:  "Error parsing config file \"testdata/config-bad-extra-field.yaml\": yaml: unmarshal errors:\n  line 8: field doesNotExist not found in type config.AuthModule",
+			want:  "error parsing config file \"testdata/config-bad-extra-field.yaml\": yaml: unmarshal errors:\n  line 8: field doesNotExist not found in type config.AuthModule",
 		},
 	}
 

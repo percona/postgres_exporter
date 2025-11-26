@@ -1,5 +1,4 @@
 //go:build manual
-// +build manual
 
 package main
 
