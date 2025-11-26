@@ -53,10 +53,10 @@ func sanitizeQuery(q string) string {
 	q = strings.ReplaceAll(q, ")", "\\)")
 	q = strings.ReplaceAll(q, "[", "\\[")
 	q = strings.ReplaceAll(q, "]", "\\]")
-	q = strings.Replace(q, "{", "\\{", -1)
-	q = strings.Replace(q, "}", "\\}", -1)
-	q = strings.Replace(q, "*", "\\*", -1)
-	q = strings.Replace(q, "^", "\\^", -1)
-	q = strings.Replace(q, "$", "\\$", -1)
+	q = strings.ReplaceAll(q, "{", "\\{")
+	q = strings.ReplaceAll(q, "}", "\\}")
+	q = strings.ReplaceAll(q, "*", "\\*")
+	q = strings.ReplaceAll(q, "^", "\\^")
+	q = strings.ReplaceAll(q, "$", "\\$")
 	return q
 }
