@@ -68,7 +68,7 @@ type pgSetting struct {
 func (s *pgSetting) metric(labels prometheus.Labels) prometheus.Metric {
 	var (
 		err       error
-		name      = strings.Replace(s.name, ".", "_", -1)
+		name      = strings.ReplaceAll(s.name, ".", "_")
 		unit      = s.unit // nolint: ineffassign
 		shortDesc = fmt.Sprintf("Server Parameter: %s", s.name)
 		subsystem = "settings"
@@ -132,7 +132,7 @@ func (s *pgSetting) normaliseUnit() (val float64, unit string, err error) {
 	case "B", "kB", "MB", "GB", "TB", "1kB", "2kB", "4kB", "8kB", "16kB", "32kB", "64kB", "16MB", "32MB", "64MB":
 		unit = "bytes"
 	default:
-		err = fmt.Errorf("Unknown unit for runtime variable: %q", s.unit)
+		err = fmt.Errorf("unknown unit for runtime variable: %q", s.unit)
 		return
 	}
 
