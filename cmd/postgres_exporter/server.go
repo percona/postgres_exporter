@@ -72,7 +72,7 @@ func NewServer(dsn string, opts ...ServerOpt) (*Server, error) {
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 
-	level.Info(logger).Log("msg", "Established new database connection", "fingerprint", fingerprint)
+	level.Debug(logger).Log("msg", "Established new database connection", "fingerprint", fingerprint)
 
 	s := &Server{
 		db:     db,
