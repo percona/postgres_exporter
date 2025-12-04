@@ -11,9 +11,9 @@ require (
 	github.com/montanaflynn/stats v0.7.1
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.20.5
-	github.com/prometheus/client_model v0.6.1
-	github.com/prometheus/common v0.60.1
-	github.com/prometheus/exporter-toolkit v0.13.1
+	github.com/prometheus/client_model v0.6.2
+	github.com/prometheus/common v0.66.1
+	github.com/prometheus/exporter-toolkit v0.15.0
 	github.com/smartystreets/goconvey v1.8.1
 	github.com/stretchr/testify v1.11.1
 	github.com/tklauser/go-sysconf v0.3.16
@@ -47,9 +47,11 @@ require (
 	github.com/smarty/assertions v1.16.0 // indirect
 	github.com/tklauser/numcpus v0.11.0 // indirect
 	github.com/xhit/go-str2duration/v2 v2.1.0 // indirect
+	go.yaml.in/yaml/v2 v2.4.3 // indirect
 	golang.org/x/crypto v0.45.0 // indirect
 	golang.org/x/net v0.47.0 // indirect
 	golang.org/x/oauth2 v0.33.0 // indirect
 	golang.org/x/text v0.31.0 // indirect
+	golang.org/x/time v0.13.0 // indirect
 	google.golang.org/protobuf v1.36.10 // indirect
 )
