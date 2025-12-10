@@ -135,31 +135,30 @@ var (
 	)
 
 	statIOQuery = `
+		WITH server_version AS (
+			SELECT current_setting('server_version_num')::int AS ver
+		)
 		SELECT
-			WITH server_version AS (
-				SELECT current_setting('server_version_num')::int AS ver
-			)
-			SELECT
-				backend_type,
-				io_object,
-				io_context,
-				reads,
-				CASE WHEN server_version.ver >= 180000 THEN read_bytes ELSE NULL END as read_bytes,
-				read_time,
-				writes,
-				CASE WHEN server_version.ver >= 180000 THEN write_bytes ELSE NULL END as write_bytes,
-				write_time,
-				writebacks,
-				writeback_time,
-				extends,
-				CASE WHEN server_version.ver >= 180000 THEN extend_bytes ELSE NULL END as extend_bytes,
-				extend_time,
-				hits,
-				evictions,
-				reueses,
-				fsyncs,
-				fsync_time
-			FROM pg_stat_io, server_version;`
+			backend_type,
+			object,
+			context,
+			reads,
+			CASE WHEN server_version.ver >= 180000 THEN read_bytes ELSE NULL END as read_bytes,
+			read_time,
+			writes,
+			CASE WHEN server_version.ver >= 180000 THEN write_bytes ELSE NULL END as write_bytes,
+			write_time,
+			writebacks,
+			writeback_time,
+			extends,
+			CASE WHEN server_version.ver >= 180000 THEN extend_bytes ELSE NULL END as extend_bytes,
+			extend_time,
+			hits,
+			evictions,
+			reuses,
+			fsyncs,
+			fsync_time
+		FROM pg_stat_io, server_version;`
 )
 
 func (c *PGStatIOCollector) Update(ctx context.Context, instance *instance, ch chan<- prometheus.Metric) error {

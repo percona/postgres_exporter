@@ -216,7 +216,7 @@ const statBGWriterQueryPost17 = `SELECT
 		,stats_reset
 	FROM pg_stat_bgwriter;`
 
-const statCheckpointerQuery = `SELECT
+const statCheckpointerQuery = `
 		WITH server_version AS (
 			SELECT current_setting('server_version_num')::int AS ver
 		)
