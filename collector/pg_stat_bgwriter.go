@@ -216,23 +216,35 @@ const statBGWriterQueryPost17 = `SELECT
 		,stats_reset
 	FROM pg_stat_bgwriter;`
 
-const statCheckpointerQuery = `
-		WITH server_version AS (
-			SELECT current_setting('server_version_num')::int AS ver
-		)
+const statCheckpointerQueryPrePG18 = `
 		SELECT
 			num_timed,
 			num_requested,
-			CASE WHEN ver >= 180000 THEN COALESCE(num_done, 0) ELSE 0 END as num_done,
+			num_done,
 			restartpoints_timed,
 			restartpoints_req,
 			restartpoints_done,
 			write_time,
 			sync_time,
 			buffers_written,
-			CASE WHEN ver >= 180000 THEN COALESCE(slru_written, 0) ELSE 0 END as slru_written,
+			slru_written,
 			stats_reset
-		FROM pg_stat_checkpointer, server_version;`
+		FROM pg_stat_checkpointer;`
+
+const statCheckpointerQueryPostPG18 = `
+		SELECT
+			num_timed,
+			num_requested,
+			NULL::bigint as num_done,
+			restartpoints_timed,
+			restartpoints_req,
+			restartpoints_done,
+			write_time,
+			sync_time,
+			buffers_written,
+			NULL::bigint as slru_written,
+			stats_reset
+		FROM pg_stat_checkpointer;`
 
 func (p PGStatBGWriterCollector) Update(ctx context.Context, instance *instance, ch chan<- prometheus.Metric) error {
 	db := instance.getDB()
@@ -242,6 +254,11 @@ func (p PGStatBGWriterCollector) Update(ctx context.Context, instance *instance,
 	var sr sql.NullTime
 
 	v18plus := instance.version.GTE(semver.Version{Major: 18})
+
+	statCheckpointerQuery := statCheckpointerQueryPrePG18
+	if v18plus {
+		statCheckpointerQuery = statCheckpointerQueryPostPG18
+	}
 
 	if instance.version.GE(semver.MustParse("17.0.0")) {
 		row := db.QueryRowContext(ctx,

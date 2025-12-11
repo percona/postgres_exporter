@@ -134,31 +134,51 @@ var (
 		prometheus.Labels{},
 	)
 
-	statIOQuery = `
-		WITH server_version AS (
-			SELECT current_setting('server_version_num')::int AS ver
-		)
+	statIOQueryPrePG18 = `
 		SELECT
 			backend_type,
 			object,
 			context,
 			reads,
-			CASE WHEN server_version.ver >= 180000 THEN read_bytes ELSE NULL END as read_bytes,
+			NULL:bigint as read_bytes,
 			read_time,
 			writes,
-			CASE WHEN server_version.ver >= 180000 THEN write_bytes ELSE NULL END as write_bytes,
+			NULL:bigint as write_bytes,
 			write_time,
 			writebacks,
 			writeback_time,
 			extends,
-			CASE WHEN server_version.ver >= 180000 THEN extend_bytes ELSE NULL END as extend_bytes,
+			NULL:numeric as extend_bytes,
 			extend_time,
 			hits,
 			evictions,
 			reuses,
 			fsyncs,
 			fsync_time
-		FROM pg_stat_io, server_version;`
+		FROM pg_stat_io;`
+
+	statIOQueryPostPG18 = `
+		SELECT
+			backend_type,
+			object,
+			context,
+			reads,
+			read_bytes,
+			read_time,
+			writes,
+			write_bytes,
+			write_time,
+			writebacks,
+			writeback_time,
+			extends,
+			extend_bytes,
+			extend_time,
+			hits,
+			evictions,
+			reuses,
+			fsyncs,
+			fsync_time
+		FROM pg_stat_io;`
 )
 
 func (c *PGStatIOCollector) Update(ctx context.Context, instance *instance, ch chan<- prometheus.Metric) error {
@@ -170,6 +190,11 @@ func (c *PGStatIOCollector) Update(ctx context.Context, instance *instance, ch c
 	db := instance.getDB()
 
 	v18plus := instance.version.GTE(semver.Version{Major: 18})
+
+	statIOQuery := statIOQueryPrePG18
+	if v18plus {
+		statIOQuery = statIOQueryPostPG18
+	}
 
 	rows, err := db.QueryContext(ctx, statIOQuery)
 	if err != nil {
