@@ -1,8 +1,5 @@
 pg_stat_user_tables:
   query: |
-    WITH server_version AS (
-      SELECT current_setting('server_version_num')::int AS ver
-    )
     SELECT
       current_database() datname,
       schemaname,
@@ -25,13 +22,14 @@ pg_stat_user_tables:
       vacuum_count,
       autovacuum_count,
       analyze_count,
-      autoanalyze_count,
-      CASE WHEN server_version.ver >= 180000 THEN COALESCE(total_vacuum_time, 0) ELSE 0 END as total_vacuum_time,
-      CASE WHEN server_version.ver >= 180000 THEN COALESCE(total_autovacuum_time, 0) ELSE 0 END as total_autovacuum_time,
-      CASE WHEN server_version.ver >= 180000 THEN COALESCE(total_analyze_time, 0) ELSE 0 END as total_analyze_time,
-      CASE WHEN server_version.ver >= 180000 THEN COALESCE(total_autoanalyze_time, 0) ELSE 0 END as total_autoanalyze_time
+      autoanalyze_count
+      -- PostgreSQL 18+, cannot be added due backword compatibility: https://perconadev.atlassian.net/browse/PMM-14632
+      -- total_vacuum_time,
+      -- total_autovacuum_time,
+      -- total_analyze_time,
+      -- total_autoanalyze_time,
     FROM
-      pg_stat_user_tables, server_version
+      pg_stat_user_tables
   metrics:
     - datname:
         usage: "LABEL"
@@ -99,18 +97,19 @@ pg_stat_user_tables:
     - autoanalyze_count:
         usage: "COUNTER"
         description: "Number of times this table has been analyzed by the autovacuum daemon"
-    - total_vacuum_time:
-        usage: "COUNTER"
-        description: "Time spent vacuuming this table, in milliseconds"
-    - total_autovacuum_time:
-        usage: "COUNTER"
-        description: "Time spent auto-vacuuming this table, in milliseconds"
-    - total_analyze_time:
-        usage: "COUNTER"
-        description: "Time spent analyzing this table, in milliseconds"
-    - total_autoanalyze_time:
-        usage: "COUNTER"
-        description: "Time spent auto-analyzing this table, in milliseconds"
+    # PostgreSQL 18+, cannot be added due backword compatibility: https://perconadev.atlassian.net/browse/PMM-14632
+    # - total_vacuum_time:
+    #     usage: "COUNTER"
+    #     description: "Time spent vacuuming this table, in milliseconds"
+    # - total_autovacuum_time:
+    #     usage: "COUNTER"
+    #     description: "Time spent auto-vacuuming this table, in milliseconds"
+    # - total_analyze_time:
+    #     usage: "COUNTER"
+    #     description: "Time spent analyzing this table, in milliseconds"
+    # - total_autoanalyze_time:
+    #     usage: "COUNTER"
+    #     description: "Time spent auto-analyzing this table, in milliseconds"
 
 pg_statio_user_tables:
   query: "SELECT current_database() datname, schemaname, relname, heap_blks_read, heap_blks_hit, idx_blks_read, idx_blks_hit, toast_blks_read, toast_blks_hit, tidx_blks_read, tidx_blks_hit FROM pg_statio_user_tables"
