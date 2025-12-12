@@ -16,6 +16,7 @@ package collector
 import (
 	"context"
 	"database/sql"
+
 	"github.com/blang/semver/v4"
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -43,6 +44,12 @@ var (
 	statBGWriterCheckpointsReqDesc = prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, bgWriterSubsystem, "checkpoints_req_total"),
 		"Number of requested checkpoints that have been performed",
+		[]string{"collector", "server"},
+		prometheus.Labels{},
+	)
+	statBGWriterCheckpointsDoneDesc = prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, bgWriterSubsystem, "checkpoints_done_total"),
+		"Number of completed checkpoints",
 		[]string{"collector", "server"},
 		prometheus.Labels{},
 	)
@@ -94,6 +101,12 @@ var (
 		[]string{"collector", "server"},
 		prometheus.Labels{},
 	)
+	statBGWriterCheckpointsSlruWrittenDesc = prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, bgWriterSubsystem, "slru_written_total"),
+		"Number of SLRU buffers written during checkpoints and restartpoints",
+		[]string{"collector", "server"},
+		prometheus.Labels{},
+	)
 	statBGWriterStatsResetDesc = prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, bgWriterSubsystem, "stats_reset_total"),
 		"Time at which these statistics were last reset",
@@ -111,6 +124,12 @@ var statBGWriter = map[string]*prometheus.Desc{
 	"percona_checkpoints_req": prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, bgWriterSubsystem, "checkpoints_req"),
 		"Number of requested checkpoints that have been performed",
+		[]string{"collector", "server"},
+		prometheus.Labels{},
+	),
+	"percona_checkpoints_done": prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, bgWriterSubsystem, "checkpoints_done"),
+		"Number of completed checkpoints",
 		[]string{"collector", "server"},
 		prometheus.Labels{},
 	),
@@ -162,6 +181,12 @@ var statBGWriter = map[string]*prometheus.Desc{
 		[]string{"collector", "server"},
 		prometheus.Labels{},
 	),
+	"percona_slru_written": prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, bgWriterSubsystem, "slru_written"),
+		"Number of SLRU buffers written during checkpoints and restartpoints",
+		[]string{"collector", "server"},
+		prometheus.Labels{},
+	),
 	"percona_stats_reset": prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, bgWriterSubsystem, "stats_reset"),
 		"Time at which these statistics were last reset",
@@ -191,24 +216,49 @@ const statBGWriterQueryPost17 = `SELECT
 		,stats_reset
 	FROM pg_stat_bgwriter;`
 
-const statCheckpointerQuery = `SELECT
-		num_timed
-		,num_requested
-		,restartpoints_timed
-		,restartpoints_req
-		,restartpoints_done
-		,write_time
-		,sync_time
-		,buffers_written
-		,stats_reset
-	FROM pg_stat_checkpointer;`
+const statCheckpointerQueryPrePG18 = `
+		SELECT
+			num_timed,
+			num_requested,
+			NULL::bigint as num_done,
+			restartpoints_timed,
+			restartpoints_req,
+			restartpoints_done,
+			write_time,
+			sync_time,
+			buffers_written,
+			NULL::bigint as slru_written,
+			stats_reset
+		FROM pg_stat_checkpointer;`
+
+const statCheckpointerQueryPostPG18 = `
+		SELECT
+			num_timed,
+			num_requested,
+			num_done,
+			restartpoints_timed,
+			restartpoints_req,
+			restartpoints_done,
+			write_time,
+			sync_time,
+			buffers_written,
+			slru_written,
+			stats_reset
+		FROM pg_stat_checkpointer;`
 
 func (p PGStatBGWriterCollector) Update(ctx context.Context, instance *instance, ch chan<- prometheus.Metric) error {
 	db := instance.getDB()
 
-	var cpt, cpr, bcp, bc, mwc, bb, bbf, ba sql.NullInt64
+	var cpt, cpr, cpd, bcp, bc, mwc, bb, bbf, ba, slruw sql.NullInt64
 	var cpwt, cpst sql.NullFloat64
 	var sr sql.NullTime
+
+	v18plus := instance.version.GTE(semver.Version{Major: 18})
+
+	statCheckpointerQuery := statCheckpointerQueryPrePG18
+	if v18plus {
+		statCheckpointerQuery = statCheckpointerQueryPostPG18
+	}
 
 	if instance.version.GE(semver.MustParse("17.0.0")) {
 		row := db.QueryRowContext(ctx,
@@ -219,10 +269,9 @@ func (p PGStatBGWriterCollector) Update(ctx context.Context, instance *instance,
 		}
 		var rpt, rpr, rpd sql.NullInt64
 		var csr sql.NullTime
-		// these variables are not used, but I left them here for reference
-		row = db.QueryRowContext(ctx,
-			statCheckpointerQuery)
-		err = row.Scan(&cpt, &cpr, &rpt, &rpr, &rpd, &cpwt, &cpst, &bcp, &csr)
+
+		row = db.QueryRowContext(ctx, statCheckpointerQuery)
+		err = row.Scan(&cpt, &cpr, &cpd, &rpt, &rpr, &rpd, &cpwt, &cpst, &bcp, &slruw, &csr)
 		if err != nil {
 			return err
 		}
@@ -257,6 +306,21 @@ func (p PGStatBGWriterCollector) Update(ctx context.Context, instance *instance,
 		"exporter",
 		instance.name,
 	)
+
+	cpdMetric := 0.0
+	if v18plus {
+		if cpd.Valid {
+			cpdMetric = float64(cpd.Int64)
+		}
+		ch <- prometheus.MustNewConstMetric(
+			statBGWriterCheckpointsDoneDesc,
+			prometheus.CounterValue,
+			cpdMetric,
+			"exporter",
+			instance.name,
+		)
+	}
+
 	cpwtMetric := 0.0
 	if cpwt.Valid {
 		cpwtMetric = float64(cpwt.Float64)
@@ -345,6 +409,19 @@ func (p PGStatBGWriterCollector) Update(ctx context.Context, instance *instance,
 		"exporter",
 		instance.name,
 	)
+	slruwMetric := 0.0
+	if v18plus {
+		if slruw.Valid {
+			slruwMetric = float64(slruw.Int64)
+		}
+		ch <- prometheus.MustNewConstMetric(
+			statBGWriterCheckpointsSlruWrittenDesc,
+			prometheus.CounterValue,
+			slruwMetric,
+			"exporter",
+			instance.name,
+		)
+	}
 	srMetric := 0.0
 	if sr.Valid {
 		srMetric = float64(sr.Time.Unix())
@@ -373,6 +450,15 @@ func (p PGStatBGWriterCollector) Update(ctx context.Context, instance *instance,
 		"exporter",
 		instance.name,
 	)
+	if v18plus {
+		ch <- prometheus.MustNewConstMetric(
+			statBGWriter["percona_checkpoints_done"],
+			prometheus.CounterValue,
+			cpdMetric,
+			"exporter",
+			instance.name,
+		)
+	}
 	ch <- prometheus.MustNewConstMetric(
 		statBGWriter["percona_checkpoint_write_time"],
 		prometheus.CounterValue,
@@ -429,6 +515,15 @@ func (p PGStatBGWriterCollector) Update(ctx context.Context, instance *instance,
 		"exporter",
 		instance.name,
 	)
+	if v18plus {
+		ch <- prometheus.MustNewConstMetric(
+			statBGWriter["percona_slru_written"],
+			prometheus.CounterValue,
+			slruwMetric,
+			"exporter",
+			instance.name,
+		)
+	}
 	ch <- prometheus.MustNewConstMetric(
 		statBGWriter["percona_stats_reset"],
 		prometheus.CounterValue,
