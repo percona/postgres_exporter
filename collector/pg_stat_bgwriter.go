@@ -220,21 +220,6 @@ const statCheckpointerQueryPrePG18 = `
 		SELECT
 			num_timed,
 			num_requested,
-			num_done,
-			restartpoints_timed,
-			restartpoints_req,
-			restartpoints_done,
-			write_time,
-			sync_time,
-			buffers_written,
-			slru_written,
-			stats_reset
-		FROM pg_stat_checkpointer;`
-
-const statCheckpointerQueryPostPG18 = `
-		SELECT
-			num_timed,
-			num_requested,
 			NULL::bigint as num_done,
 			restartpoints_timed,
 			restartpoints_req,
@@ -243,6 +228,21 @@ const statCheckpointerQueryPostPG18 = `
 			sync_time,
 			buffers_written,
 			NULL::bigint as slru_written,
+			stats_reset
+		FROM pg_stat_checkpointer;`
+
+const statCheckpointerQueryPostPG18 = `
+		SELECT
+			num_timed,
+			num_requested,
+			num_done,
+			restartpoints_timed,
+			restartpoints_req,
+			restartpoints_done,
+			write_time,
+			sync_time,
+			buffers_written,
+			slru_written,
 			stats_reset
 		FROM pg_stat_checkpointer;`
 

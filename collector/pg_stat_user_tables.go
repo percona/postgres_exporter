@@ -207,10 +207,10 @@ var (
 			analyze_count,
 			autoanalyze_count,
 			pg_total_relation_size(relid) as total_size,
-			NULL::double as total_vacuum_time,
-			NULL::double as total_autovacuum_time,
-			NULL::double as total_analyze_time,
-			NULL::double as total_autoanalyze_time
+			NULL::double precision as total_vacuum_time,
+			NULL::double precision as total_autovacuum_time,
+			NULL::double precision as total_analyze_time,
+			NULL::double precision as total_autoanalyze_time
 		FROM pg_stat_user_tables;`
 
 	statUserTablesQueryPostPG18 = `
