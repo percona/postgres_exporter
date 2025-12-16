@@ -1,3 +1,12 @@
+## [Unreleased]
+
+* [ENHANCEMENT] Add PostgreSQL 18 support:
+  * Add parallel worker activity metrics
+  * Add vacuum/analyze timing metrics
+  * Add enhanced checkpointer metrics
+  * Add `pg_stat_io` collector with byte statistics and WAL I/O activity tracking
+* [ENHANCEMENT] Update CI tested PostgreSQL versions to include PostgreSQL 18
+
 ## 0.15.0 / 2023-10-27
 
 * [ENHANCEMENT] Add 1kB and 2kB units #915
