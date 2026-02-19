@@ -409,7 +409,7 @@ func (s *FunctionalSuite) TestBooleanConversionToValueAndString(c *C) {
 func (s *FunctionalSuite) TestParseUserQueries(c *C) {
 	userQueriesData, err := os.ReadFile("./tests/user_queries_ok.yaml")
 	if err == nil {
-		metricMaps, newQueryOverrides, err := parseUserQueries(userQueriesData)
+		metricMaps, newQueryOverrides, err := parseUserQueries(userQueriesData, distributionStandard)
 		c.Assert(err, Equals, nil)
 		c.Assert(metricMaps, NotNil)
 		c.Assert(newQueryOverrides, NotNil)

@@ -27,10 +27,11 @@ import (
 // Server describes a connection to Postgres.
 // Also it contains metrics map and query overrides.
 type Server struct {
-	db          *sql.DB
-	labels      prometheus.Labels
-	master      bool
-	runonserver string
+	db           *sql.DB
+	distribution string
+	labels       prometheus.Labels
+	master       bool
+	runonserver  string
 
 	// Last version used to calculate metric map. If mismatch on scrape,
 	// then maps are recalculated.
@@ -80,7 +81,17 @@ func NewServer(dsn string, opts ...ServerOpt) (*Server, error) {
 		labels: prometheus.Labels{
 			serverLabelName: fingerprint,
 		},
-		metricCache: make(map[string]cachedMetrics),
+		metricCache:  make(map[string]cachedMetrics),
+		distribution: distributionStandard,
+	}
+
+	// Detect Aurora by running SHOW rds.extensions
+	rows, err := db.Query("SHOW rds.extensions;")
+	if err == nil {
+		defer rows.Close()
+		if rows.Next() {
+			s.distribution = distributionAurora
+		}
 	}
 
 	for _, opt := range opts {
