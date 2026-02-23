@@ -26,6 +26,8 @@ import (
 const (
 	distributionStandard = "standard"
 	distributionAurora   = "aurora"
+	// '!' is a reserved character indicating that the query is not supported on Aurora and should be skipped for Aurora instances.
+	notSupportedByAurora = "!"
 )
 
 // UserQuery represents a user defined query, including support for Aurora, if needed
@@ -219,11 +221,15 @@ func parseUserQueries(content []byte, distribution string) (map[string]intermedi
 		level.Debug(logger).Log("msg", "New user metric namespace from YAML metric", "metric", metric, "cache_seconds", specs.CacheSeconds)
 
 		// Query selection logic:
-		// - For Aurora: use query_aurora if defined and not empty, otherwise use query if defined and not empty. Skip if neither is set.
-		// - For standard (non-Aurora): always use query.
+		// For Aurora: use query_aurora if defined and not empty, otherwise use query if defined and not empty.
+		// If query_aurora is set to '!', skip this query for Aurora (not supported).
+		// For standard (non-Aurora): always use query.
 		switch distribution {
 		case distributionAurora:
 			if specs.QueryAurora != "" {
+				if specs.QueryAurora == notSupportedByAurora {
+					continue
+				}
 				newQueryOverrides[metric] = specs.QueryAurora
 			} else {
 				newQueryOverrides[metric] = specs.Query
