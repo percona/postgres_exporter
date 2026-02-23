@@ -81,6 +81,16 @@ pg_replication:
 			distribution: "aurora",
 			wantQuery:    "aurora",
 		},
+		{
+			name: "Not supported by Aurora",
+			yamlInput: `
+pg_replication:
+  query: "standard"
+  query_aurora: "!"
+`,
+			distribution: "aurora",
+			wantQuery:    "",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
