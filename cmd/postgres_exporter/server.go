@@ -16,6 +16,7 @@ package main
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -85,11 +86,12 @@ func NewServer(dsn string, opts ...ServerOpt) (*Server, error) {
 		distribution: distributionStandard,
 	}
 
-	// Detect Aurora by running SHOW rds.extensions
-	rows, err := db.Query("SHOW rds.extensions;")
-	if err == nil {
-		defer rows.Close()
-		if rows.Next() {
+	// Detect Aurora by checking version string
+	row := db.QueryRow("SELECT version();")
+	var versionStr string
+	if err := row.Scan(&versionStr); err == nil {
+		level.Info(logger).Log("msg", "Postgres version", "version", versionStr)
+		if strings.Contains(strings.ToLower(versionStr), "aurora") {
 			s.distribution = distributionAurora
 		}
 	}
