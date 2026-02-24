@@ -85,13 +85,11 @@ func NewServer(dsn string, opts ...ServerOpt) (*Server, error) {
 		distribution: distributionStandard,
 	}
 
-	// Detect Aurora by checking for aurora_version function
-	rows, err := db.Query("SELECT 1 FROM pg_proc WHERE proname = 'aurora_version';")
-	if err == nil {
-		defer rows.Close()
-		if rows.Next() {
-			s.distribution = distributionAurora
-		}
+	// Detect Aurora by checking if aurora_version function exists
+	row := db.QueryRow("SELECT to_regproc('aurora_version') IS NOT NULL;")
+	var isAurora bool
+	if err := row.Scan(&isAurora); err == nil && isAurora {
+		s.distribution = distributionAurora
 	}
 
 	for _, opt := range opts {
