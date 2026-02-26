@@ -147,3 +147,15 @@ pg_statio_user_tables:
     - tidx_blks_hit:
         usage: "COUNTER"
         description: "Number of buffer hits in this table's TOAST table indexes (if any)"
+
+pg_custom_database_size_custom:
+  master: true
+  query: "SELECT pg_database.datname, pg_database_size(pg_database.datname) as bytes FROM pg_database"
+  cache_seconds: 30
+  metrics:
+    - datname:
+        usage: "LABEL"
+        description: "Name of the database"
+    - bytes:
+        usage: "GAUGE"
+        description: "Disk space used by the database"
