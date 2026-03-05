@@ -21,11 +21,11 @@ import (
 	"github.com/blang/semver/v4"
 	"github.com/go-kit/log/level"
 	"gopkg.in/yaml.v2"
+
+	"github.com/percona/postgres_exporter/distribution"
 )
 
 const (
-	distributionStandard = "standard"
-	distributionAurora   = "aurora"
 	// '!' is a reserved character indicating that the query is not supported on Aurora and should be skipped for Aurora instances.
 	notSupportedByAurora = "!"
 )
@@ -205,7 +205,7 @@ func makeQueryOverrideMap(pgVersion semver.Version, queryOverrides map[string][]
 	return resultMap
 }
 
-func parseUserQueries(content []byte, distribution string) (map[string]intermediateMetricMap, map[string]string, error) {
+func parseUserQueries(content []byte, dist string) (map[string]intermediateMetricMap, map[string]string, error) {
 	var userQueries UserQueries
 
 	err := yaml.Unmarshal(content, &userQueries)
@@ -224,8 +224,8 @@ func parseUserQueries(content []byte, distribution string) (map[string]intermedi
 		// For Aurora: use query_aurora if defined and not empty, otherwise use query if defined and not empty.
 		// If query_aurora is set to '!', skip this query for Aurora (not supported).
 		// For standard (non-Aurora): always use query.
-		switch distribution {
-		case distributionAurora:
+		switch dist {
+		case distribution.Aurora:
 			if specs.QueryAurora != "" {
 				if specs.QueryAurora == notSupportedByAurora {
 					continue

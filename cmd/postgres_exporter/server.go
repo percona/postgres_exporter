@@ -21,6 +21,7 @@ import (
 
 	"github.com/blang/semver/v4"
 	"github.com/go-kit/log/level"
+	"github.com/percona/postgres_exporter/distribution"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -81,16 +82,9 @@ func NewServer(dsn string, opts ...ServerOpt) (*Server, error) {
 		labels: prometheus.Labels{
 			serverLabelName: fingerprint,
 		},
-		metricCache:  make(map[string]cachedMetrics),
-		distribution: distributionStandard,
+		metricCache: make(map[string]cachedMetrics),
 	}
-
-	// Detect Aurora by checking if aurora_version function exists
-	row := db.QueryRow("SELECT to_regproc('aurora_version') IS NOT NULL;")
-	var isAurora bool
-	if err := row.Scan(&isAurora); err == nil && isAurora {
-		s.distribution = distributionAurora
-	}
+	s.distribution = distribution.Get(dsn, db)
 
 	for _, opt := range opts {
 		opt(s)

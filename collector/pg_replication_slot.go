@@ -18,6 +18,7 @@ import (
 	"database/sql"
 
 	"github.com/go-kit/log"
+	"github.com/percona/postgres_exporter/distribution"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -80,6 +81,11 @@ var (
 
 func (PGReplicationSlotCollector) Update(ctx context.Context, instance *instance, ch chan<- prometheus.Metric) error {
 	db := instance.getDB()
+	// Skip Aurora instances (not supported pg_last_wal_receive_lsn)
+	if distribution.IsAurora(instance.dsn, db) {
+		return nil
+	}
+
 	rows, err := db.QueryContext(ctx,
 		pgReplicationSlotQuery)
 	if err != nil {
