@@ -39,7 +39,7 @@ func Get(dsn string, db *sql.DB) string {
 	// Detect Aurora by checking if aurora_version function exists.
 	row := db.QueryRow("SELECT to_regproc('aurora_version') IS NOT NULL;")
 	var detected bool
-	if err := row.Scan(&detected); err == nil {
+	if err := row.Scan(&detected); err == nil && detected {
 		cache.Store(dsn, Aurora)
 		return Aurora
 	}
