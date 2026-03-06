@@ -1,4 +1,4 @@
-module github.com/prometheus-community/postgres_exporter
+module github.com/percona/postgres_exporter
 
 go 1.25.7
 

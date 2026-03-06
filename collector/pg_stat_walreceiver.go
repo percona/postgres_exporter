@@ -19,6 +19,7 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	"github.com/percona/postgres_exporter/distribution"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -122,6 +123,11 @@ receive_start_tli,
 
 func (c *PGStatWalReceiverCollector) Update(ctx context.Context, instance *instance, ch chan<- prometheus.Metric) error {
 	db := instance.getDB()
+	// Skip Aurora instances (not supported pg_stat_get_wal_receiver)
+	if distribution.IsAurora(instance.dsn, db) {
+		return nil
+	}
+
 	hasFlushedLSNRows, err := db.QueryContext(ctx, pgStatWalColumnQuery)
 	if err != nil {
 		return err

@@ -16,6 +16,7 @@ package collector
 import (
 	"context"
 
+	"github.com/percona/postgres_exporter/distribution"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -66,6 +67,11 @@ var (
 
 func (c *PGReplicationCollector) Update(ctx context.Context, instance *instance, ch chan<- prometheus.Metric) error {
 	db := instance.getDB()
+	// Skip Aurora instances (not supported pg_last_wal_receive_lsn)
+	if distribution.IsAurora(instance.dsn, db) {
+		return nil
+	}
+
 	row := db.QueryRowContext(ctx,
 		pgReplicationQuery,
 	)
