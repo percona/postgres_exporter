@@ -21,12 +21,20 @@ import (
 	"github.com/blang/semver/v4"
 	"github.com/go-kit/log/level"
 	"gopkg.in/yaml.v2"
+
+	"github.com/percona/postgres_exporter/distribution"
 )
 
-// UserQuery represents a user defined query
+const (
+	// '!' is a reserved character indicating that the query is not supported on Aurora and should be skipped for Aurora instances.
+	notSupportedByAurora = "!"
+)
+
+// UserQuery represents a user defined query, including support for Aurora, if needed
 type UserQuery struct {
-	Query        string    `yaml:"query"`
-	Metrics      []Mapping `yaml:"metrics"`
+	Query        string    `yaml:"query"`         // Standard query
+	QueryAurora  string    `yaml:"query_aurora"`  // Aurora specific query
+	Metrics      []Mapping `yaml:"metrics"`       // Metrics to be collected
 	Master       bool      `yaml:"master"`        // Querying only for master database
 	CacheSeconds uint64    `yaml:"cache_seconds"` // Number of seconds to cache the namespace result metrics for.
 	RunOnServer  string    `yaml:"runonserver"`   // Querying to run on which server version
@@ -197,7 +205,7 @@ func makeQueryOverrideMap(pgVersion semver.Version, queryOverrides map[string][]
 	return resultMap
 }
 
-func parseUserQueries(content []byte) (map[string]intermediateMetricMap, map[string]string, error) {
+func parseUserQueries(content []byte, dist string) (map[string]intermediateMetricMap, map[string]string, error) {
 	var userQueries UserQueries
 
 	err := yaml.Unmarshal(content, &userQueries)
@@ -211,7 +219,25 @@ func parseUserQueries(content []byte) (map[string]intermediateMetricMap, map[str
 
 	for metric, specs := range userQueries {
 		level.Debug(logger).Log("msg", "New user metric namespace from YAML metric", "metric", metric, "cache_seconds", specs.CacheSeconds)
-		newQueryOverrides[metric] = specs.Query
+
+		// Query selection logic:
+		// For Aurora: use query_aurora if defined and not empty, otherwise use query if defined and not empty.
+		// If query_aurora is set to '!', skip this query for Aurora (not supported).
+		// For standard (non-Aurora): always use query.
+		switch dist {
+		case distribution.Aurora:
+			if specs.QueryAurora != "" {
+				if specs.QueryAurora == notSupportedByAurora {
+					continue
+				}
+				newQueryOverrides[metric] = specs.QueryAurora
+			} else {
+				newQueryOverrides[metric] = specs.Query
+			}
+		default:
+			newQueryOverrides[metric] = specs.Query
+		}
+
 		metricMap, ok := metricMaps[metric]
 		if !ok {
 			// Namespace for metric not found - add it.
@@ -251,7 +277,7 @@ func parseUserQueries(content []byte) (map[string]intermediateMetricMap, map[str
 // TODO: test code for all cu.
 // TODO: the YAML this supports is "non-standard" - we should move away from it.
 func addQueries(content []byte, pgVersion semver.Version, server *Server) error {
-	metricMaps, newQueryOverrides, err := parseUserQueries(content)
+	metricMaps, newQueryOverrides, err := parseUserQueries(content, server.distribution)
 	if err != nil {
 		return err
 	}

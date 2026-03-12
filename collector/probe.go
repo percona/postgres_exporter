@@ -19,7 +19,7 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-	"github.com/prometheus-community/postgres_exporter/config"
+	"github.com/percona/postgres_exporter/config"
 	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/sync/semaphore"
 )

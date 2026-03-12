@@ -1,6 +1,6 @@
 [![Build Status](https://circleci.com/gh/prometheus-community/postgres_exporter.svg?style=svg)](https://circleci.com/gh/prometheus-community/postgres_exporter)
 [![Coverage Status](https://coveralls.io/repos/github/prometheus-community/postgres_exporter/badge.svg?branch=master)](https://coveralls.io/github/prometheus-community/postgres_exporter?branch=master)
-[![Go Report Card](https://goreportcard.com/badge/github.com/prometheus-community/postgres_exporter)](https://goreportcard.com/report/github.com/prometheus-community/postgres_exporter)
+[![Go Report Card](https://goreportcard.com/badge/github.com/percona/postgres_exporter)](https://goreportcard.com/report/github.com/percona/postgres_exporter)
 [![Docker Pulls](https://img.shields.io/docker/pulls/prometheuscommunity/postgres-exporter.svg)](https://hub.docker.com/r/prometheuscommunity/postgres-exporter/tags)
 
 # PostgreSQL Server Exporter
@@ -73,7 +73,7 @@ auth_modules:
 
 ## Building and running
 
-    git clone https://github.com/prometheus-community/postgres_exporter.git
+    git clone https://github.com/percona/postgres_exporter.git
     cd postgres_exporter
     make build
     ./postgres_exporter <flags>
