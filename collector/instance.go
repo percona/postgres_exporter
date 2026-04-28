@@ -114,7 +114,7 @@ func queryVersion(db *sql.DB) (semver.Version, error) {
 }
 
 func parseServerName(url string) (string, error) {
-	dsn, err := pq.ParseURL(url)
+	dsn, err := pq.ParseURL(url) //nolint:staticcheck
 	if err != nil {
 		dsn = url
 	}

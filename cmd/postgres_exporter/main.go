@@ -14,7 +14,9 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -23,13 +25,12 @@ import (
 	"github.com/alecthomas/kingpin/v2"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-	"github.com/prometheus-community/postgres_exporter/config"
+	"github.com/percona/postgres_exporter/config"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	vc "github.com/prometheus/client_golang/prometheus/collectors/version"
-	"github.com/prometheus/common/promlog"
-	"github.com/prometheus/common/promlog/flag"
 	"github.com/prometheus/common/promslog"
+	promslogflag "github.com/prometheus/common/promslog/flag"
 	"github.com/prometheus/common/version"
 	"github.com/prometheus/exporter-toolkit/web"
 	"github.com/prometheus/exporter-toolkit/web/kingpinflag"
@@ -41,7 +42,8 @@ var (
 		Config: &config.Config{},
 	}
 
-	configFile    = kingpin.Flag("config.file", "Postgres exporter configuration file.").Default("postgres_exporter.yml").String()
+	// Default is empty so you don't need a config file if using only DSN settings.
+	configFile    = kingpin.Flag("config.file", "Postgres exporter configuration file.").Default("").String()
 	webConfig     = kingpinflag.AddFlags(kingpin.CommandLine, ":9187")
 	webConfigFile = kingpin.Flag(
 		"web.config",
@@ -75,23 +77,63 @@ const (
 	serverLabelName = "server"
 )
 
+// slogGoKitBridge adapts a *slog.Logger to the go-kit log.Logger interface so
+// the rest of the codebase can keep using go-kit log/level patterns.
+type slogGoKitBridge struct {
+	l *slog.Logger
+}
+
+func (b *slogGoKitBridge) Log(keyvals ...interface{}) error {
+	if len(keyvals) == 0 {
+		return nil
+	}
+	lvl := slog.LevelInfo
+	msg := ""
+	var args []any
+	for i := 0; i+1 < len(keyvals); i += 2 {
+		k := fmt.Sprint(keyvals[i])
+		v := keyvals[i+1]
+		switch k {
+		case "level":
+			switch fmt.Sprint(v) {
+			case "debug":
+				lvl = slog.LevelDebug
+			case "warn":
+				lvl = slog.LevelWarn
+			case "error":
+				lvl = slog.LevelError
+			}
+		case "msg":
+			msg = fmt.Sprint(v)
+		default:
+			args = append(args, k, v)
+		}
+	}
+	b.l.Log(context.Background(), lvl, msg, args...)
+	return nil
+}
+
 func main() {
 	kingpin.Version(version.Print(exporterName))
-	promlogConfig := &promlog.Config{}
-	flag.AddFlags(kingpin.CommandLine, promlogConfig)
+	promlogConfig := &promslog.Config{}
+	promslogflag.AddFlags(kingpin.CommandLine, promlogConfig)
 	kingpin.HelpFlag.Short('h')
 	webConfig.WebConfigFile = webConfigFile
 	kingpin.Parse()
-	logger = promlog.New(promlogConfig)
+	logger = &slogGoKitBridge{promslog.New(promlogConfig)}
 
 	if *onlyDumpMaps {
 		dumpMaps()
 		return
 	}
 
-	if err := c.ReloadConfig(*configFile, logger); err != nil {
-		// This is not fatal, but it means that auth must be provided for every dsn.
-		level.Warn(logger).Log("msg", "Error loading config", "err", err)
+	// Load the config file if specified, otherwise use default/DSN settings
+	if *configFile != "" {
+		if err := c.ReloadConfig(*configFile, logger); err != nil {
+			level.Warn(logger).Log("msg", "Error loading config", "err", err)
+		}
+	} else {
+		level.Debug(logger).Log("msg", "No config file provided, using default/DSN settings")
 	}
 
 	dsns, err := getDataSources()
@@ -102,10 +144,6 @@ func main() {
 
 	excludedDatabases := strings.Split(*excludeDatabases, ",")
 	logger.Log("msg", "Excluded databases", "databases", fmt.Sprintf("%v", excludedDatabases))
-
-	// if *queriesPath != "" {
-	//	level.Warn(logger).Log("msg", "The extended queries.yaml config is DEPRECATED", "file", *queriesPath)
-	// }
 
 	if *autoDiscoverDatabases || *excludeDatabases != "" || *includeDatabases != "" {
 		level.Warn(logger).Log("msg", "Scraping additional databases via auto discovery is DEPRECATED")

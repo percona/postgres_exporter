@@ -21,16 +21,18 @@ import (
 
 	"github.com/blang/semver/v4"
 	"github.com/go-kit/log/level"
+	"github.com/percona/postgres_exporter/distribution"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
 // Server describes a connection to Postgres.
 // Also it contains metrics map and query overrides.
 type Server struct {
-	db          *sql.DB
-	labels      prometheus.Labels
-	master      bool
-	runonserver string
+	db           *sql.DB
+	distribution string
+	labels       prometheus.Labels
+	master       bool
+	runonserver  string
 
 	// Last version used to calculate metric map. If mismatch on scrape,
 	// then maps are recalculated.
@@ -82,6 +84,7 @@ func NewServer(dsn string, opts ...ServerOpt) (*Server, error) {
 		},
 		metricCache: make(map[string]cachedMetrics),
 	}
+	s.distribution = distribution.Get(dsn, db)
 
 	for _, opt := range opts {
 		opt(s)

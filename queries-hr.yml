@@ -31,6 +31,7 @@ pg_custom_replication_slots:
 
 pg_custom_stat_wal_receiver:
   master: true
+  # standard query
   query: |
     SELECT
       status,
@@ -43,6 +44,8 @@ pg_custom_stat_wal_receiver:
       EXTRACT(EPOCH FROM last_msg_send_time) AS last_msg_send_time_seconds,
       EXTRACT(EPOCH FROM last_msg_receipt_time) AS last_msg_receipt_time_seconds
     FROM pg_stat_wal_receiver;
+  # skipped for Aurora by query_aurora == '!'
+  query_aurora: "!"
   metrics:
     - status:
         usage: "LABEL"
@@ -71,20 +74,6 @@ pg_custom_stat_wal_receiver:
     - last_msg_receipt_time_seconds:
         usage: "GAUGE"
         description: "Timestamp of the last message received in seconds since the epoch."
-
-
-pg_custom_database_size_custom:
-  master: true
-  query: "SELECT pg_database.datname, pg_database_size(pg_database.datname) as bytes FROM pg_database"
-  cache_seconds: 30
-  metrics:
-    - datname:
-        usage: "LABEL"
-        description: "Name of the database"
-    - bytes:
-        usage: "GAUGE"
-        description: "Disk space used by the database"
-
 
 pg_custom_stat_replication:
   master: true
@@ -155,7 +144,7 @@ pg_custom_stat_activity_walsender:
     WHERE backend_type = 'walsender';
   metrics:
     - pid:
-        usage: "GAUGE"
+        usage: "LABEL"
         description: "Process ID of the WAL sender"
     - usename:
         usage: "LABEL"
@@ -184,7 +173,7 @@ pg_custom_stat_subscription:
         usage: "LABEL"
         description: "Subscription Name"
     - pid:
-        usage: "GAUGE"
+        usage: "LABEL"
         description: "Process ID of subscription worker"
     - received_lsn:
         usage: "GAUGE"
