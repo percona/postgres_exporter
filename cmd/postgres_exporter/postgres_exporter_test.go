@@ -12,7 +12,6 @@
 // limitations under the License.
 
 //go:build !integration
-// +build !integration
 
 package main
 
@@ -24,6 +23,7 @@ import (
 	"time"
 
 	"github.com/blang/semver/v4"
+	"github.com/percona/postgres_exporter/distribution"
 	"github.com/prometheus/client_golang/prometheus"
 	. "gopkg.in/check.v1"
 )
@@ -410,7 +410,7 @@ func (s *FunctionalSuite) TestBooleanConversionToValueAndString(c *C) {
 func (s *FunctionalSuite) TestParseUserQueries(c *C) {
 	userQueriesData, err := os.ReadFile("./tests/user_queries_ok.yaml")
 	if err == nil {
-		metricMaps, newQueryOverrides, err := parseUserQueries(userQueriesData)
+		metricMaps, newQueryOverrides, err := parseUserQueries(userQueriesData, distribution.Standard)
 		c.Assert(err, Equals, nil)
 		c.Assert(metricMaps, NotNil)
 		c.Assert(newQueryOverrides, NotNil)

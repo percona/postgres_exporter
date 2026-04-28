@@ -23,7 +23,7 @@ import (
 	"github.com/alecthomas/kingpin/v2"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-	"github.com/prometheus-community/postgres_exporter/config"
+	"github.com/percona/postgres_exporter/config"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	vc "github.com/prometheus/client_golang/prometheus/collectors/version"
@@ -41,7 +41,8 @@ var (
 		Config: &config.Config{},
 	}
 
-	configFile    = kingpin.Flag("config.file", "Postgres exporter configuration file.").Default("postgres_exporter.yml").String()
+	// Default is empty so you don't need a config file if using only DSN settings.
+	configFile    = kingpin.Flag("config.file", "Postgres exporter configuration file.").Default("").String()
 	webConfig     = kingpinflag.AddFlags(kingpin.CommandLine, ":9187")
 	webConfigFile = kingpin.Flag(
 		"web.config",
@@ -89,9 +90,13 @@ func main() {
 		return
 	}
 
-	if err := c.ReloadConfig(*configFile, logger); err != nil {
-		// This is not fatal, but it means that auth must be provided for every dsn.
-		level.Warn(logger).Log("msg", "Error loading config", "err", err)
+	// Load the config file if specified, otherwise use default/DSN settings
+	if *configFile != "" {
+		if err := c.ReloadConfig(*configFile, logger); err != nil {
+			level.Warn(logger).Log("msg", "Error loading config", "err", err)
+		}
+	} else {
+		level.Debug(logger).Log("msg", "No config file provided, using default/DSN settings")
 	}
 
 	dsns, err := getDataSources()
@@ -102,10 +107,6 @@ func main() {
 
 	excludedDatabases := strings.Split(*excludeDatabases, ",")
 	logger.Log("msg", "Excluded databases", "databases", fmt.Sprintf("%v", excludedDatabases))
-
-	// if *queriesPath != "" {
-	//	level.Warn(logger).Log("msg", "The extended queries.yaml config is DEPRECATED", "file", *queriesPath)
-	// }
 
 	if *autoDiscoverDatabases || *excludeDatabases != "" || *includeDatabases != "" {
 		level.Warn(logger).Log("msg", "Scraping additional databases via auto discovery is DEPRECATED")

@@ -38,7 +38,11 @@ func querySettings(ch chan<- prometheus.Metric, server *Server) error {
 	//
 	// NOTE: If you add more vartypes here, you must update the supported
 	// types in normaliseUnit() below
-	query := "SELECT name, setting, COALESCE(unit, ''), short_desc, vartype FROM pg_settings WHERE vartype IN ('bool', 'integer', 'real') AND name != 'sync_commit_cancel_wait';"
+	//
+	// Settings intentionally ignored due to invalid format:
+	// - `sync_commit_cancel_wait`, specific to Azure Postgres, see https://github.com/prometheus-community/postgres_exporter/issues/523
+	// - `google_dataplex.max_messages`, specific to Google Cloud SQL, see https://github.com/prometheus-community/postgres_exporter/issues/1240
+	query := "SELECT name, setting, COALESCE(unit, ''), short_desc, vartype FROM pg_settings WHERE vartype IN ('bool', 'integer', 'real') AND name NOT IN ('sync_commit_cancel_wait', 'google_dataplex.max_messages');"
 
 	rows, err := server.db.Query(query)
 	if err != nil {
@@ -68,7 +72,7 @@ type pgSetting struct {
 func (s *pgSetting) metric(labels prometheus.Labels) prometheus.Metric {
 	var (
 		err       error
-		name      = strings.Replace(s.name, ".", "_", -1)
+		name      = strings.ReplaceAll(s.name, ".", "_")
 		unit      = s.unit // nolint: ineffassign
 		shortDesc = fmt.Sprintf("Server Parameter: %s", s.name)
 		subsystem = "settings"
@@ -132,7 +136,7 @@ func (s *pgSetting) normaliseUnit() (val float64, unit string, err error) {
 	case "B", "kB", "MB", "GB", "TB", "1kB", "2kB", "4kB", "8kB", "16kB", "32kB", "64kB", "16MB", "32MB", "64MB":
 		unit = "bytes"
 	default:
-		err = fmt.Errorf("Unknown unit for runtime variable: %q", s.unit)
+		err = fmt.Errorf("unknown unit for runtime variable: %q", s.unit)
 		return
 	}
 

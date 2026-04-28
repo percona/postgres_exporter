@@ -172,7 +172,7 @@ func dbToString(t interface{}) (string, bool) {
 }
 
 func parseFingerprint(url string) (string, error) {
-	dsn, err := pq.ParseURL(url)
+	dsn, err := pq.ParseURL(url) //nolint:staticcheck
 	if err != nil {
 		dsn = url
 	}
