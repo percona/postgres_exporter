@@ -173,7 +173,7 @@ pg_custom_stat_subscription:
         usage: "LABEL"
         description: "Subscription Name"
     - pid:
-        usage: "GAUGE"
+        usage: "LABEL"
         description: "Process ID of subscription worker"
     - received_lsn:
         usage: "GAUGE"
