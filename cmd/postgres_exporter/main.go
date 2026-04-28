@@ -14,7 +14,9 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -27,9 +29,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	vc "github.com/prometheus/client_golang/prometheus/collectors/version"
-	"github.com/prometheus/common/promlog"
-	"github.com/prometheus/common/promlog/flag"
 	"github.com/prometheus/common/promslog"
+	promslogflag "github.com/prometheus/common/promslog/flag"
 	"github.com/prometheus/common/version"
 	"github.com/prometheus/exporter-toolkit/web"
 	"github.com/prometheus/exporter-toolkit/web/kingpinflag"
@@ -76,14 +77,50 @@ const (
 	serverLabelName = "server"
 )
 
+// slogGoKitBridge adapts a *slog.Logger to the go-kit log.Logger interface so
+// the rest of the codebase can keep using go-kit log/level patterns.
+type slogGoKitBridge struct {
+	l *slog.Logger
+}
+
+func (b *slogGoKitBridge) Log(keyvals ...interface{}) error {
+	if len(keyvals) == 0 {
+		return nil
+	}
+	lvl := slog.LevelInfo
+	msg := ""
+	var args []any
+	for i := 0; i+1 < len(keyvals); i += 2 {
+		k := fmt.Sprint(keyvals[i])
+		v := keyvals[i+1]
+		switch k {
+		case "level":
+			switch fmt.Sprint(v) {
+			case "debug":
+				lvl = slog.LevelDebug
+			case "warn":
+				lvl = slog.LevelWarn
+			case "error":
+				lvl = slog.LevelError
+			}
+		case "msg":
+			msg = fmt.Sprint(v)
+		default:
+			args = append(args, k, v)
+		}
+	}
+	b.l.Log(context.Background(), lvl, msg, args...)
+	return nil
+}
+
 func main() {
 	kingpin.Version(version.Print(exporterName))
-	promlogConfig := &promlog.Config{}
-	flag.AddFlags(kingpin.CommandLine, promlogConfig)
+	promlogConfig := &promslog.Config{}
+	promslogflag.AddFlags(kingpin.CommandLine, promlogConfig)
 	kingpin.HelpFlag.Short('h')
 	webConfig.WebConfigFile = webConfigFile
 	kingpin.Parse()
-	logger = promlog.New(promlogConfig)
+	logger = &slogGoKitBridge{promslog.New(promlogConfig)}
 
 	if *onlyDumpMaps {
 		dumpMaps()
