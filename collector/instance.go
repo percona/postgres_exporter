@@ -21,6 +21,7 @@ import (
 
 	"github.com/blang/semver/v4"
 	"github.com/lib/pq"
+	"github.com/percona/postgres_exporter/internal/versioncache"
 )
 
 type instance struct {
@@ -67,7 +68,7 @@ func (i *instance) setup() error {
 	db.SetMaxIdleConns(1)
 	i.db = db
 
-	version, err := queryVersion(i.db)
+	version, _, err := versioncache.GetVersion(i.db, i.name, queryVersion)
 	if err != nil {
 		return fmt.Errorf("error querying postgresql version: %w", err)
 	} else {
@@ -89,28 +90,30 @@ func (i *instance) Close() error {
 var versionRegex = regexp.MustCompile(`^\w+ ((\d+)(\.\d+)?(\.\d+)?)`)
 var serverVersionRegex = regexp.MustCompile(`^((\d+)(\.\d+)?(\.\d+)?)`)
 
-func queryVersion(db *sql.DB) (semver.Version, error) {
+func queryVersion(db *sql.DB, server string) (semver.Version, string, error) {
 	var version string
 	err := db.QueryRow("SELECT version();").Scan(&version)
 	if err != nil {
-		return semver.Version{}, err
+		return semver.Version{}, "", fmt.Errorf("error scanning version string on %q: %w", server, err)
 	}
 	submatches := versionRegex.FindStringSubmatch(version)
 	if len(submatches) > 1 {
-		return semver.ParseTolerant(submatches[1])
+		semanticVersion, err := semver.ParseTolerant(submatches[1])
+		return semanticVersion, version, err
 	}
 
 	// We could also try to parse the version from the server_version field.
 	// This is of the format 13.3 (Debian 13.3-1.pgdg100+1)
 	err = db.QueryRow("SHOW server_version;").Scan(&version)
 	if err != nil {
-		return semver.Version{}, err
+		return semver.Version{}, "", fmt.Errorf("error scanning server_version on %q: %w", server, err)
 	}
 	submatches = serverVersionRegex.FindStringSubmatch(version)
 	if len(submatches) > 1 {
-		return semver.ParseTolerant(submatches[1])
+		semanticVersion, err := semver.ParseTolerant(submatches[1])
+		return semanticVersion, version, err
 	}
-	return semver.Version{}, fmt.Errorf("could not parse version from %q", version)
+	return semver.Version{}, "", fmt.Errorf("could not parse version from %q on %q", version, server)
 }
 
 func parseServerName(url string) (string, error) {

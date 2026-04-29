@@ -27,6 +27,7 @@ import (
 
 	"github.com/blang/semver/v4"
 	"github.com/go-kit/log/level"
+	"github.com/percona/postgres_exporter/internal/versioncache"
 	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/sync/semaphore"
 )
@@ -690,7 +691,7 @@ func checkPostgresVersion(db *sql.DB, server string) (semver.Version, string, er
 
 // Check and update the exporters query maps if the version has changed.
 func (e *Exporter) checkMapVersions(ch chan<- prometheus.Metric, server *Server) error {
-	semanticVersion, versionString, err := getVersion(server.db, server.String())
+	semanticVersion, versionString, err := versioncache.GetVersion(server.db, server.String(), checkPostgresVersion)
 	if err != nil {
 		return fmt.Errorf("Error fetching version string on %q: %v", server, err)
 	}
