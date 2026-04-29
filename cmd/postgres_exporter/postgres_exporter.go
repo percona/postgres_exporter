@@ -690,7 +690,7 @@ func checkPostgresVersion(db *sql.DB, server string) (semver.Version, string, er
 
 // Check and update the exporters query maps if the version has changed.
 func (e *Exporter) checkMapVersions(ch chan<- prometheus.Metric, server *Server) error {
-	semanticVersion, versionString, err := checkPostgresVersion(server.db, server.String())
+	semanticVersion, versionString, err := getVersion(server.db, server.String())
 	if err != nil {
 		return fmt.Errorf("Error fetching version string on %q: %v", server, err)
 	}
