@@ -17,7 +17,10 @@ package distribution
 
 import (
 	"database/sql"
+	"fmt"
 	"sync"
+
+	"github.com/lib/pq"
 )
 
 const (
@@ -25,29 +28,47 @@ const (
 	Aurora   = "aurora"
 )
 
-// cache stores detection results keyed by DSN. If a DSN is not found in
+// cache stores detection results keyed by host:port. If a host:port is not found in
 // the cache, we query the database to determine if it is an Aurora instance.
-var cache sync.Map // map[string]string
+var (
+	cache = make(map[string]string)
+	mtx   sync.Mutex
+)
 
 func Get(dsn string, db *sql.DB) string {
-	if v, ok := cache.Load(dsn); ok {
-		if s, ok := v.(string); ok {
-			return s
-		}
+	fingerprint, err := parseFingerprint(dsn)
+	if err != nil {
+		fingerprint = dsn
+	}
+
+	mtx.Lock()
+	defer mtx.Unlock()
+
+	if cached, ok := cache[fingerprint]; ok {
+		return cached
 	}
 
 	// Detect Aurora by checking if aurora_version function exists.
 	row := db.QueryRow("SELECT to_regproc('aurora_version') IS NOT NULL;")
 	var detected bool
 	if err := row.Scan(&detected); err == nil && detected {
-		cache.Store(dsn, Aurora)
+		cache[fingerprint] = Aurora
 		return Aurora
 	}
 
-	cache.Store(dsn, Standard)
+	cache[fingerprint] = Standard
 	return Standard
 }
 
 func IsAurora(dsn string, db *sql.DB) bool {
 	return Get(dsn, db) == Aurora
+}
+
+func parseFingerprint(dsn string) (string, error) {
+	cfg, err := pq.NewConfig(dsn)
+	if err != nil {
+		return "", err
+	}
+
+	return fmt.Sprintf("%s:%d", cfg.Host, cfg.Port), nil
 }
