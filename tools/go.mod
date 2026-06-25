@@ -4,7 +4,7 @@ go 1.25.7
 
 require (
 	github.com/golangci/golangci-lint/v2 v2.12.2
-	github.com/prometheus/promu v0.19.0
+	github.com/prometheus/promu v0.20.0
 	github.com/reviewdog/reviewdog v0.21.0
 	honnef.co/go/tools v0.7.0
 )
