@@ -14,7 +14,6 @@ jobs:
     strategy:
       matrix:
         postgresql-image:
-          - postgres:13
           - postgres:14
           - postgres:15
           - postgres:16
@@ -23,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout code
-      uses: actions/checkout@v6.0.3
+      uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
     - name: Set up Go
       uses: actions/setup-go@v6.5.0
