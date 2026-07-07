@@ -1,8 +1,6 @@
 module github.com/percona/postgres_exporter/tools
 
-go 1.23.0
-
-toolchain go1.24.3
+go 1.26.4
 
 require (
 	github.com/golangci/golangci-lint v1.63.4
