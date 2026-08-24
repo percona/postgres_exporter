@@ -8,7 +8,7 @@ require (
 	github.com/blang/semver/v4 v4.0.0
 	github.com/go-kit/log v0.2.1
 	github.com/lib/pq v1.12.3
-	github.com/montanaflynn/stats v0.12.3
+	github.com/montanaflynn/stats v0.12.4
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.23.2
 	github.com/prometheus/client_model v0.6.2
