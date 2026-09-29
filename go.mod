@@ -11,7 +11,7 @@ require (
 	github.com/montanaflynn/stats v0.12.5
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.23.2
-	github.com/prometheus/client_model v0.6.2
+	github.com/prometheus/client_model v0.6.3
 	github.com/prometheus/common v0.70.1
 	github.com/prometheus/exporter-toolkit v0.17.1
 	github.com/smartystreets/goconvey v1.8.1
@@ -54,5 +54,5 @@ require (
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
-	google.golang.org/protobuf v1.36.11 // indirect
+	google.golang.org/protobuf v1.36.12 // indirect
 )
