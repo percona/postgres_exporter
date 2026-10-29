@@ -19,6 +19,7 @@ jobs:
           - postgres:16
           - postgres:17
           - postgres:18
+          - postgres:19beta2
     runs-on: ubuntu-latest
     steps:
     - name: Checkout code
