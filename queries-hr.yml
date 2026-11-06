@@ -204,3 +204,62 @@ pg_custom_publication:
     - pubdelete:
         usage: "GAUGE"
         description: "Delete operations published"
+
+pg_custom_aurora_replica_status:
+  master: true
+  # Aurora only: without a plain query, other PostgreSQL servers skip this block
+  query_aurora: |
+    SELECT server_id,
+      CASE WHEN session_id = 'MASTER_SESSION_ID' THEN 'writer' ELSE 'reader' END AS role,
+      COALESCE(replica_lag_in_msec, 0) / 1000.0 AS replica_lag_seconds
+    FROM aurora_replica_status();
+  metrics:
+    - server_id:
+        usage: "LABEL"
+        description: "Aurora DB instance identifier."
+    - role:
+        usage: "LABEL"
+        description: "Role of the instance in the cluster (writer or reader)."
+    - replica_lag_seconds:
+        usage: "GAUGE"
+        description: "Replication lag of the reader behind the writer, in seconds (0 for the writer)."
+
+pg_custom_aurora_dml_activity:
+  master: true
+  # Aurora only: without a plain query, other PostgreSQL servers skip this block
+  query_aurora: |
+    SELECT d.datname,
+      a.select_count, a.select_latency_microsecs / 1e6 AS select_latency_seconds,
+      a.insert_count, a.insert_latency_microsecs / 1e6 AS insert_latency_seconds,
+      a.update_count, a.update_latency_microsecs / 1e6 AS update_latency_seconds,
+      a.delete_count, a.delete_latency_microsecs / 1e6 AS delete_latency_seconds
+    FROM pg_database d, LATERAL aurora_stat_dml_activity(d.oid) a
+    WHERE d.datallowconn AND NOT d.datistemplate AND d.datname <> 'rdsadmin';
+  metrics:
+    - datname:
+        usage: "LABEL"
+        description: "Name of the database."
+    - select_count:
+        usage: "COUNTER"
+        description: "Number of SELECT statements run."
+    - select_latency_seconds:
+        usage: "COUNTER"
+        description: "Total time spent in SELECT statements, in seconds."
+    - insert_count:
+        usage: "COUNTER"
+        description: "Number of INSERT statements run."
+    - insert_latency_seconds:
+        usage: "COUNTER"
+        description: "Total time spent in INSERT statements, in seconds."
+    - update_count:
+        usage: "COUNTER"
+        description: "Number of UPDATE statements run."
+    - update_latency_seconds:
+        usage: "COUNTER"
+        description: "Total time spent in UPDATE statements, in seconds."
+    - delete_count:
+        usage: "COUNTER"
+        description: "Number of DELETE statements run."
+    - delete_latency_seconds:
+        usage: "COUNTER"
+        description: "Total time spent in DELETE statements, in seconds."
