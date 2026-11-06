@@ -16,10 +16,35 @@
 package main
 
 import (
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/percona/postgres_exporter/distribution"
 )
+
+// The Aurora-only blocks in the shipped file must resolve to an empty query on other servers:
+// a namespace missing from the overrides would be queried as a table and fail on every scrape.
+func TestShippedQueriesHrAuroraBlocks(t *testing.T) {
+	content, err := os.ReadFile("../../queries-hr.yml")
+	require.NoError(t, err)
+	namespaces := []string{"pg_custom_aurora_replica_status", "pg_custom_aurora_dml_activity"}
+
+	_, standard, err := parseUserQueries(content, distribution.Standard)
+	require.NoError(t, err)
+	for _, ns := range namespaces {
+		query, found := standard[ns]
+		require.True(t, found, ns)
+		require.Empty(t, query, ns)
+	}
+
+	_, aurora, err := parseUserQueries(content, distribution.Aurora)
+	require.NoError(t, err)
+	require.Contains(t, aurora["pg_custom_aurora_replica_status"], "aurora_replica_status()")
+	require.Contains(t, aurora["pg_custom_aurora_dml_activity"], "aurora_stat_dml_activity(d.oid)")
+	require.Contains(t, aurora["pg_custom_aurora_dml_activity"], "'rdsadmin'")
+}
 
 func TestParseUserQueries_DistributionSelection(t *testing.T) {
 	cases := []struct {
