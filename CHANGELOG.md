@@ -1,5 +1,6 @@
 ## [Unreleased]
 
+* [ENHANCEMENT] Add Aurora PostgreSQL replica lag and DML activity queries to queries-hr.yml
 * [ENHANCEMENT] Add PostgreSQL 18 support:
   * Add parallel worker activity metrics
   * Add vacuum/analyze timing metrics
