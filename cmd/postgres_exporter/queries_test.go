@@ -42,6 +42,7 @@ func TestShippedQueriesHrAuroraBlocks(t *testing.T) {
 	_, aurora, err := parseUserQueries(content, distribution.Aurora)
 	require.NoError(t, err)
 	require.Contains(t, aurora["pg_custom_aurora_replica_status"], "aurora_replica_status()")
+	require.Contains(t, aurora["pg_custom_aurora_replica_status"], "AS aurora_role")
 	require.Contains(t, aurora["pg_custom_aurora_dml_activity"], "aurora_stat_dml_activity(d.oid)")
 	require.Contains(t, aurora["pg_custom_aurora_dml_activity"], "'rdsadmin'")
 }

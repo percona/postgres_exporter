@@ -210,14 +210,14 @@ pg_custom_aurora_replica_status:
   # Aurora only: without a plain query, other PostgreSQL servers skip this block
   query_aurora: |
     SELECT server_id,
-      CASE WHEN session_id = 'MASTER_SESSION_ID' THEN 'writer' ELSE 'reader' END AS role,
+      CASE WHEN session_id = 'MASTER_SESSION_ID' THEN 'writer' ELSE 'reader' END AS aurora_role,
       COALESCE(replica_lag_in_msec, 0) / 1000.0 AS replica_lag_seconds
     FROM aurora_replica_status();
   metrics:
     - server_id:
         usage: "LABEL"
         description: "Aurora DB instance identifier."
-    - role:
+    - aurora_role:
         usage: "LABEL"
         description: "Role of the instance in the cluster (writer or reader)."
     - replica_lag_seconds:
