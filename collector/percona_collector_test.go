@@ -1,0 +1,142 @@
+// Copyright 2026 Percona LLC
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package collector
+
+import (
+	"bytes"
+	"context"
+	"log/slog"
+	"testing"
+	"time"
+
+	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/percona/postgres_exporter/config"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/common/promslog"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/semaphore"
+)
+
+func TestPerconaCollectorsAreRegistered(t *testing.T) {
+	for _, name := range []string{config.CollectorExtensions, config.CollectorReplicationSlot, config.CollectorStatIO} {
+		factory, ok := factories[name]
+		require.True(t, ok, name)
+		assert.Equal(t, serverScope, factory.scope, name)
+	}
+}
+
+func TestPostgresCollectorDefaultsMatchPMM(t *testing.T) {
+	p, err := NewPostgresCollector(promslog.NewNopLogger(), nil, testDSN, nil)
+	require.NoError(t, err)
+
+	names := make([]string, 0, len(p.Collectors))
+	for name := range p.Collectors {
+		names = append(names, name)
+	}
+	assert.ElementsMatch(t, []string{
+		"database", "database_wraparound", "extensions", "locks", "replication", "replication_slot",
+		"stat_bgwriter", "stat_database", "stat_user_tables", "statio_user_tables",
+	}, names)
+}
+
+func TestInstanceServerName(t *testing.T) {
+	assert.Equal(t, testServer, (&instance{dsn: testDSN}).serverName())
+	assert.Equal(t, "/var/run/postgresql:5432", (&instance{dsn: "postgres://user:pass@/postgres?host=%2Fvar%2Frun%2Fpostgresql&sslmode=disable"}).serverName())
+	assert.Empty(t, (&instance{dsn: "not a dsn"}).serverName())
+}
+
+func TestPerconaCollectorAcquireConnection(t *testing.T) {
+	t.Run("no semaphore", func(t *testing.T) {
+		release, err := perconaCollector{}.acquireConnection(context.Background())
+		require.NoError(t, err)
+		release()
+	})
+
+	t.Run("waits for a free slot until the scrape is cancelled", func(t *testing.T) {
+		sem := semaphore.NewWeighted(1)
+		p := perconaCollector{connSema: sem}
+
+		release, err := p.acquireConnection(context.Background())
+		require.NoError(t, err)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+		defer cancel()
+		_, err = p.acquireConnection(ctx)
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+
+		release()
+		release, err = p.acquireConnection(context.Background())
+		require.NoError(t, err)
+		release()
+	})
+}
+
+func TestPostgresCollectorCollectsNothingWithoutFreeConnection(t *testing.T) {
+	sem := semaphore.NewWeighted(1)
+	require.True(t, sem.TryAcquire(1))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, nil))
+
+	// The DSN points nowhere: the scrape has to give up before it tries to connect.
+	p, err := NewPostgresCollector(logger, nil, "postgres://127.0.0.1:1/postgres?sslmode=disable&connect_timeout=1", nil,
+		WithContext(ctx), WithConnectionsSemaphore(sem))
+	require.NoError(t, err)
+
+	ch := make(chan prometheus.Metric)
+	go func() {
+		defer close(ch)
+		p.Collect(ch)
+	}()
+	for m := range ch {
+		t.Errorf("unexpected metric: %s", m.Desc())
+	}
+	assert.Contains(t, logs.String(), "Failed to acquire semaphore")
+	assert.NotContains(t, logs.String(), "Error opening connection to database")
+}
+
+func TestPostgresCollectorReleasesItsConnectionSlot(t *testing.T) {
+	sem := semaphore.NewWeighted(1)
+
+	p, err := NewPostgresCollector(promslog.NewNopLogger(), nil, "postgres://127.0.0.1:1/postgres?sslmode=disable&connect_timeout=1", nil,
+		WithConnectionsSemaphore(sem))
+	require.NoError(t, err)
+
+	ch := make(chan prometheus.Metric)
+	go func() {
+		defer close(ch)
+		p.Collect(ch)
+	}()
+	for range ch {
+	}
+	assert.True(t, sem.TryAcquire(1))
+}
+
+func TestPGStatWalReceiverCollectorSkipsAurora(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	c := PGStatWalReceiverCollector{log: promslog.NewNopLogger()}
+	metrics := collected(t, func(ch chan<- prometheus.Metric) error {
+		return c.Update(context.Background(), &instance{db: db, isAurora: true}, ch)
+	})
+
+	assert.Empty(t, metrics)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
