@@ -15,14 +15,13 @@ package collector
 
 import (
 	"context"
+	"database/sql"
 
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-const walSubsystem = "wal"
-
 func init() {
-	registerCollector(walSubsystem, defaultDisabled, NewPGWALCollector)
+	registerCollector(walSubsystem, serverScope, NewPGWALCollector)
 }
 
 type PGWALCollector struct {
@@ -67,18 +66,26 @@ func (c PGWALCollector) Update(ctx context.Context, instance *instance, ch chan<
 	)
 
 	var segments uint64
-	var size uint64
+	var size sql.NullInt64
 	err := row.Scan(&segments, &size)
 	if err != nil {
+		// Some Amazon Aurora PostgreSQL versions reject pg_ls_waldir() as
+		// feature_not_supported. Report no data there instead of failing
+		// every scrape; other Aurora versions run it as usual.
+		if instance.isAurora && isFeatureNotSupported(err) {
+			return ErrNoData
+		}
 		return err
 	}
 	ch <- prometheus.MustNewConstMetric(
 		pgWALSegments,
 		prometheus.GaugeValue, float64(segments),
 	)
-	ch <- prometheus.MustNewConstMetric(
-		pgWALSize,
-		prometheus.GaugeValue, float64(size),
-	)
+	if size.Valid {
+		ch <- prometheus.MustNewConstMetric(
+			pgWALSize,
+			prometheus.GaugeValue, float64(size.Int64),
+		)
+	}
 	return nil
 }

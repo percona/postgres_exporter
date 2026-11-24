@@ -16,20 +16,20 @@ package collector
 import (
 	"context"
 	"database/sql"
+	"log/slog"
 
 	"github.com/blang/semver/v4"
-	"github.com/go-kit/log"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
 const statIOSubsystem = "stat_io"
 
 func init() {
-	registerCollector(statIOSubsystem, defaultDisabled, NewPGStatIOCollector)
+	registerCollector(statIOSubsystem, serverScope, NewPGStatIOCollector)
 }
 
 type PGStatIOCollector struct {
-	log log.Logger
+	log *slog.Logger
 }
 
 func NewPGStatIOCollector(config collectorConfig) (Collector, error) {

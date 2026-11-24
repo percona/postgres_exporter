@@ -16,20 +16,17 @@ package collector
 import (
 	"context"
 	"database/sql"
+	"log/slog"
 
-	"github.com/blang/semver/v4"
-	"github.com/go-kit/log"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-const userTableSubsystem = "stat_user_tables"
-
 func init() {
-	registerCollector(userTableSubsystem, defaultEnabled, NewPGStatUserTablesCollector)
+	registerCollector(userTableSubsystem, databaseScope, NewPGStatUserTablesCollector)
 }
 
 type PGStatUserTablesCollector struct {
-	log log.Logger
+	log *slog.Logger
 }
 
 func NewPGStatUserTablesCollector(config collectorConfig) (Collector, error) {
@@ -151,111 +148,53 @@ var (
 		[]string{"datname", "schemaname", "relname"},
 		prometheus.Labels{},
 	)
-	statUserTablesTotalSize = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, userTableSubsystem, "size_bytes"),
-		"Total disk space used by this table, in bytes, including all indexes and TOAST data",
+	statUserIndexSize = prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, userTableSubsystem, "index_size_bytes"),
+		"Total disk space used by this index, in bytes",
 		[]string{"datname", "schemaname", "relname"},
 		prometheus.Labels{},
 	)
-	statUserTablesTotalVacuumTime = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, userTableSubsystem, "total_vacuum_time"),
-		"Time spent vacuuming this table, in milliseconds (PostgreSQL 18+)",
-		[]string{"datname", "schemaname", "relname"},
-		prometheus.Labels{},
-	)
-	statUserTablesTotalAutovacuumTime = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, userTableSubsystem, "total_autovacuum_time"),
-		"Time spent auto-vacuuming this table, in milliseconds (PostgreSQL 18+)",
-		[]string{"datname", "schemaname", "relname"},
-		prometheus.Labels{},
-	)
-	statUserTablesTotalAnalyzeTime = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, userTableSubsystem, "total_analyze_time"),
-		"Time spent analyzing this table, in milliseconds (PostgreSQL 18+)",
-		[]string{"datname", "schemaname", "relname"},
-		prometheus.Labels{},
-	)
-	statUserTablesTotalAutoanalyzeTime = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, userTableSubsystem, "total_autoanalyze_time"),
-		"Time spent auto-analyzing this table, in milliseconds (PostgreSQL 18+)",
+	statUserTableSize = prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, userTableSubsystem, "table_size_bytes"),
+		"Total disk space used by this table, in bytes",
 		[]string{"datname", "schemaname", "relname"},
 		prometheus.Labels{},
 	)
 
-	statUserTablesQueryPrePG18 = `
-		SELECT
-			current_database() datname,
-			schemaname,
-			relname,
-			seq_scan,
-			seq_tup_read,
-			idx_scan,
-			idx_tup_fetch,
-			n_tup_ins,
-			n_tup_upd,
-			n_tup_del,
-			n_tup_hot_upd,
-			n_live_tup,
-			n_dead_tup,
-			n_mod_since_analyze,
-			COALESCE(last_vacuum, '1970-01-01Z') as last_vacuum,
-			COALESCE(last_autovacuum, '1970-01-01Z') as last_autovacuum,
-			COALESCE(last_analyze, '1970-01-01Z') as last_analyze,
-			COALESCE(last_autoanalyze, '1970-01-01Z') as last_autoanalyze,
-			vacuum_count,
-			autovacuum_count,
-			analyze_count,
-			autoanalyze_count,
-			pg_total_relation_size(relid) as total_size,
-			NULL::double precision as total_vacuum_time,
-			NULL::double precision as total_autovacuum_time,
-			NULL::double precision as total_analyze_time,
-			NULL::double precision as total_autoanalyze_time
-		FROM pg_stat_user_tables;`
-
-	statUserTablesQueryPostPG18 = `
-			SELECT
-				current_database() datname,
-				schemaname,
-				relname,
-				seq_scan,
-				seq_tup_read,
-				idx_scan,
-				idx_tup_fetch,
-				n_tup_ins,
-				n_tup_upd,
-				n_tup_del,
-				n_tup_hot_upd,
-				n_live_tup,
-				n_dead_tup,
-				n_mod_since_analyze,
-				COALESCE(last_vacuum, '1970-01-01Z') as last_vacuum,
-				COALESCE(last_autovacuum, '1970-01-01Z') as last_autovacuum,
-				COALESCE(last_analyze, '1970-01-01Z') as last_analyze,
-				COALESCE(last_autoanalyze, '1970-01-01Z') as last_autoanalyze,
-				vacuum_count,
-				autovacuum_count,
-				analyze_count,
-				autoanalyze_count,
-				pg_total_relation_size(relid) as total_size,
-				total_vacuum_time,
-				total_autovacuum_time,
-				total_analyze_time,
-				total_autoanalyze_time
-			FROM pg_stat_user_tables;`
+	statUserTablesQuery = `SELECT
+		current_database() datname,
+		schemaname,
+		relname,
+		seq_scan,
+		seq_tup_read,
+		idx_scan,
+		idx_tup_fetch,
+		n_tup_ins,
+		n_tup_upd,
+		n_tup_del,
+		n_tup_hot_upd,
+		n_live_tup,
+		n_dead_tup,
+		n_mod_since_analyze,
+		COALESCE(last_vacuum, '1970-01-01Z') as last_vacuum,
+		COALESCE(last_autovacuum, '1970-01-01Z') as last_autovacuum,
+		COALESCE(last_analyze, '1970-01-01Z') as last_analyze,
+		COALESCE(last_autoanalyze, '1970-01-01Z') as last_autoanalyze,
+		vacuum_count,
+		autovacuum_count,
+		analyze_count,
+		autoanalyze_count,
+		pg_indexes_size(relid) as indexes_size,
+		pg_table_size(relid) as table_size
+	FROM
+		pg_stat_user_tables`
 )
 
 func (c *PGStatUserTablesCollector) Update(ctx context.Context, instance *instance, ch chan<- prometheus.Metric) error {
 	db := instance.getDB()
-
-	v18plus := instance.version.GTE(semver.Version{Major: 18})
-
-	statUserTablesQuery := statUserTablesQueryPrePG18
-	if v18plus {
-		statUserTablesQuery = statUserTablesQueryPostPG18
-	}
-
-	rows, err := db.QueryContext(ctx, statUserTablesQuery)
+	timings := newStatUserTablesTimings(instance.version)
+	rows, err := db.QueryContext(ctx,
+		timings.query(statUserTablesQuery))
 
 	if err != nil {
 		return err
@@ -265,11 +204,10 @@ func (c *PGStatUserTablesCollector) Update(ctx context.Context, instance *instan
 	for rows.Next() {
 		var datname, schemaname, relname sql.NullString
 		var seqScan, seqTupRead, idxScan, idxTupFetch, nTupIns, nTupUpd, nTupDel, nTupHotUpd, nLiveTup, nDeadTup,
-			nModSinceAnalyze, vacuumCount, autovacuumCount, analyzeCount, autoanalyzeCount, totalSize sql.NullInt64
+			nModSinceAnalyze, vacuumCount, autovacuumCount, analyzeCount, autoanalyzeCount, indexSize, tableSize sql.NullInt64
 		var lastVacuum, lastAutovacuum, lastAnalyze, lastAutoanalyze sql.NullTime
-		var totalVacuumTime, totalAutovacuumTime, totalAnalyzeTime, totalAutoanalyzeTime sql.NullFloat64
 
-		if err := rows.Scan(&datname, &schemaname, &relname, &seqScan, &seqTupRead, &idxScan, &idxTupFetch, &nTupIns, &nTupUpd, &nTupDel, &nTupHotUpd, &nLiveTup, &nDeadTup, &nModSinceAnalyze, &lastVacuum, &lastAutovacuum, &lastAnalyze, &lastAutoanalyze, &vacuumCount, &autovacuumCount, &analyzeCount, &autoanalyzeCount, &totalSize, &totalVacuumTime, &totalAutovacuumTime, &totalAnalyzeTime, &totalAutoanalyzeTime); err != nil {
+		if err := rows.Scan(timings.scanTargets(&datname, &schemaname, &relname, &seqScan, &seqTupRead, &idxScan, &idxTupFetch, &nTupIns, &nTupUpd, &nTupDel, &nTupHotUpd, &nLiveTup, &nDeadTup, &nModSinceAnalyze, &lastVacuum, &lastAutovacuum, &lastAnalyze, &lastAutoanalyze, &vacuumCount, &autovacuumCount, &analyzeCount, &autoanalyzeCount, &indexSize, &tableSize)...); err != nil {
 			return err
 		}
 
@@ -286,10 +224,7 @@ func (c *PGStatUserTablesCollector) Update(ctx context.Context, instance *instan
 			relnameLabel = relname.String
 		}
 
-		seqScanMetric := 0.0
-		if seqScan.Valid {
-			seqScanMetric = float64(seqScan.Int64)
-		}
+		seqScanMetric := int64CounterValue(seqScan, instance.wrapLargeCounters)
 		ch <- prometheus.MustNewConstMetric(
 			statUserTablesSeqScan,
 			prometheus.CounterValue,
@@ -297,10 +232,7 @@ func (c *PGStatUserTablesCollector) Update(ctx context.Context, instance *instan
 			datnameLabel, schemanameLabel, relnameLabel,
 		)
 
-		seqTupReadMetric := 0.0
-		if seqTupRead.Valid {
-			seqTupReadMetric = float64(seqTupRead.Int64)
-		}
+		seqTupReadMetric := int64CounterValue(seqTupRead, instance.wrapLargeCounters)
 		ch <- prometheus.MustNewConstMetric(
 			statUserTablesSeqTupRead,
 			prometheus.CounterValue,
@@ -308,10 +240,7 @@ func (c *PGStatUserTablesCollector) Update(ctx context.Context, instance *instan
 			datnameLabel, schemanameLabel, relnameLabel,
 		)
 
-		idxScanMetric := 0.0
-		if idxScan.Valid {
-			idxScanMetric = float64(idxScan.Int64)
-		}
+		idxScanMetric := int64CounterValue(idxScan, instance.wrapLargeCounters)
 		ch <- prometheus.MustNewConstMetric(
 			statUserTablesIdxScan,
 			prometheus.CounterValue,
@@ -319,10 +248,7 @@ func (c *PGStatUserTablesCollector) Update(ctx context.Context, instance *instan
 			datnameLabel, schemanameLabel, relnameLabel,
 		)
 
-		idxTupFetchMetric := 0.0
-		if idxTupFetch.Valid {
-			idxTupFetchMetric = float64(idxTupFetch.Int64)
-		}
+		idxTupFetchMetric := int64CounterValue(idxTupFetch, instance.wrapLargeCounters)
 		ch <- prometheus.MustNewConstMetric(
 			statUserTablesIdxTupFetch,
 			prometheus.CounterValue,
@@ -330,10 +256,7 @@ func (c *PGStatUserTablesCollector) Update(ctx context.Context, instance *instan
 			datnameLabel, schemanameLabel, relnameLabel,
 		)
 
-		nTupInsMetric := 0.0
-		if nTupIns.Valid {
-			nTupInsMetric = float64(nTupIns.Int64)
-		}
+		nTupInsMetric := int64CounterValue(nTupIns, instance.wrapLargeCounters)
 		ch <- prometheus.MustNewConstMetric(
 			statUserTablesNTupIns,
 			prometheus.CounterValue,
@@ -341,10 +264,7 @@ func (c *PGStatUserTablesCollector) Update(ctx context.Context, instance *instan
 			datnameLabel, schemanameLabel, relnameLabel,
 		)
 
-		nTupUpdMetric := 0.0
-		if nTupUpd.Valid {
-			nTupUpdMetric = float64(nTupUpd.Int64)
-		}
+		nTupUpdMetric := int64CounterValue(nTupUpd, instance.wrapLargeCounters)
 		ch <- prometheus.MustNewConstMetric(
 			statUserTablesNTupUpd,
 			prometheus.CounterValue,
@@ -352,10 +272,7 @@ func (c *PGStatUserTablesCollector) Update(ctx context.Context, instance *instan
 			datnameLabel, schemanameLabel, relnameLabel,
 		)
 
-		nTupDelMetric := 0.0
-		if nTupDel.Valid {
-			nTupDelMetric = float64(nTupDel.Int64)
-		}
+		nTupDelMetric := int64CounterValue(nTupDel, instance.wrapLargeCounters)
 		ch <- prometheus.MustNewConstMetric(
 			statUserTablesNTupDel,
 			prometheus.CounterValue,
@@ -363,10 +280,7 @@ func (c *PGStatUserTablesCollector) Update(ctx context.Context, instance *instan
 			datnameLabel, schemanameLabel, relnameLabel,
 		)
 
-		nTupHotUpdMetric := 0.0
-		if nTupHotUpd.Valid {
-			nTupHotUpdMetric = float64(nTupHotUpd.Int64)
-		}
+		nTupHotUpdMetric := int64CounterValue(nTupHotUpd, instance.wrapLargeCounters)
 		ch <- prometheus.MustNewConstMetric(
 			statUserTablesNTupHotUpd,
 			prometheus.CounterValue,
@@ -451,10 +365,7 @@ func (c *PGStatUserTablesCollector) Update(ctx context.Context, instance *instan
 			datnameLabel, schemanameLabel, relnameLabel,
 		)
 
-		vacuumCountMetric := 0.0
-		if vacuumCount.Valid {
-			vacuumCountMetric = float64(vacuumCount.Int64)
-		}
+		vacuumCountMetric := int64CounterValue(vacuumCount, instance.wrapLargeCounters)
 		ch <- prometheus.MustNewConstMetric(
 			statUserTablesVacuumCount,
 			prometheus.CounterValue,
@@ -462,10 +373,7 @@ func (c *PGStatUserTablesCollector) Update(ctx context.Context, instance *instan
 			datnameLabel, schemanameLabel, relnameLabel,
 		)
 
-		autovacuumCountMetric := 0.0
-		if autovacuumCount.Valid {
-			autovacuumCountMetric = float64(autovacuumCount.Int64)
-		}
+		autovacuumCountMetric := int64CounterValue(autovacuumCount, instance.wrapLargeCounters)
 		ch <- prometheus.MustNewConstMetric(
 			statUserTablesAutovacuumCount,
 			prometheus.CounterValue,
@@ -473,10 +381,7 @@ func (c *PGStatUserTablesCollector) Update(ctx context.Context, instance *instan
 			datnameLabel, schemanameLabel, relnameLabel,
 		)
 
-		analyzeCountMetric := 0.0
-		if analyzeCount.Valid {
-			analyzeCountMetric = float64(analyzeCount.Int64)
-		}
+		analyzeCountMetric := int64CounterValue(analyzeCount, instance.wrapLargeCounters)
 		ch <- prometheus.MustNewConstMetric(
 			statUserTablesAnalyzeCount,
 			prometheus.CounterValue,
@@ -484,10 +389,7 @@ func (c *PGStatUserTablesCollector) Update(ctx context.Context, instance *instan
 			datnameLabel, schemanameLabel, relnameLabel,
 		)
 
-		autoanalyzeCountMetric := 0.0
-		if autoanalyzeCount.Valid {
-			autoanalyzeCountMetric = float64(autoanalyzeCount.Int64)
-		}
+		autoanalyzeCountMetric := int64CounterValue(autoanalyzeCount, instance.wrapLargeCounters)
 		ch <- prometheus.MustNewConstMetric(
 			statUserTablesAutoanalyzeCount,
 			prometheus.CounterValue,
@@ -495,67 +397,31 @@ func (c *PGStatUserTablesCollector) Update(ctx context.Context, instance *instan
 			datnameLabel, schemanameLabel, relnameLabel,
 		)
 
-		totalSizeMetric := 0.0
-		if totalSize.Valid {
-			totalSizeMetric = float64(totalSize.Int64)
+		indexSizeMetric := 0.0
+		if indexSize.Valid {
+			indexSizeMetric = float64(indexSize.Int64)
 		}
 		ch <- prometheus.MustNewConstMetric(
-			statUserTablesTotalSize,
+			statUserIndexSize,
 			prometheus.GaugeValue,
-			totalSizeMetric,
+			indexSizeMetric,
 			datnameLabel, schemanameLabel, relnameLabel,
 		)
 
-		if v18plus {
-			// PostgreSQL 18+ vacuum/analyze timing metrics
-			totalVacuumTimeValue := 0.0
-			if totalVacuumTime.Valid {
-				totalVacuumTimeValue = totalVacuumTime.Float64
-			}
-			ch <- prometheus.MustNewConstMetric(
-				statUserTablesTotalVacuumTime,
-				prometheus.CounterValue,
-				totalVacuumTimeValue,
-				datnameLabel, schemanameLabel, relnameLabel,
-			)
-
-			totalAutovacuumTimeValue := 0.0
-			if totalAutovacuumTime.Valid {
-				totalAutovacuumTimeValue = totalAutovacuumTime.Float64
-			}
-			ch <- prometheus.MustNewConstMetric(
-				statUserTablesTotalAutovacuumTime,
-				prometheus.CounterValue,
-				totalAutovacuumTimeValue,
-				datnameLabel, schemanameLabel, relnameLabel,
-			)
-
-			totalAnalyzeTimeValue := 0.0
-			if totalAnalyzeTime.Valid {
-				totalAnalyzeTimeValue = totalAnalyzeTime.Float64
-			}
-			ch <- prometheus.MustNewConstMetric(
-				statUserTablesTotalAnalyzeTime,
-				prometheus.CounterValue,
-				totalAnalyzeTimeValue,
-				datnameLabel, schemanameLabel, relnameLabel,
-			)
-
-			totalAutoanalyzeTimeValue := 0.0
-			if totalAutoanalyzeTime.Valid {
-				totalAutoanalyzeTimeValue = totalAutoanalyzeTime.Float64
-			}
-			ch <- prometheus.MustNewConstMetric(
-				statUserTablesTotalAutoanalyzeTime,
-				prometheus.CounterValue,
-				totalAutoanalyzeTimeValue,
-				datnameLabel, schemanameLabel, relnameLabel,
-			)
+		tableSizeMetric := 0.0
+		if tableSize.Valid {
+			tableSizeMetric = float64(tableSize.Int64)
 		}
+		ch <- prometheus.MustNewConstMetric(
+			statUserTableSize,
+			prometheus.GaugeValue,
+			tableSizeMetric,
+			datnameLabel, schemanameLabel, relnameLabel,
+		)
+
+		emitStatUserTablesTotalSize(ch, tableSizeMetric, indexSizeMetric, datnameLabel, schemanameLabel, relnameLabel)
+		timings.emit(ch, datnameLabel, schemanameLabel, relnameLabel)
 	}
 
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	return nil
+	return rows.Err()
 }

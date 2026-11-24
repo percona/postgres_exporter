@@ -16,19 +16,17 @@ package collector
 import (
 	"context"
 	"database/sql"
+	"log/slog"
 
-	"github.com/go-kit/log"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-const statioUserTableSubsystem = "statio_user_tables"
-
 func init() {
-	registerCollector(statioUserTableSubsystem, defaultEnabled, NewPGStatIOUserTablesCollector)
+	registerCollector(statioUserTableSubsystem, databaseScope, NewPGStatIOUserTablesCollector)
 }
 
 type PGStatIOUserTablesCollector struct {
-	log log.Logger
+	log *slog.Logger
 }
 
 func NewPGStatIOUserTablesCollector(config collectorConfig) (Collector, error) {
@@ -130,10 +128,7 @@ func (PGStatIOUserTablesCollector) Update(ctx context.Context, instance *instanc
 			relnameLabel = relname.String
 		}
 
-		heapBlksReadMetric := 0.0
-		if heapBlksRead.Valid {
-			heapBlksReadMetric = float64(heapBlksRead.Int64)
-		}
+		heapBlksReadMetric := int64CounterValue(heapBlksRead, instance.wrapLargeCounters)
 		ch <- prometheus.MustNewConstMetric(
 			statioUserTablesHeapBlksRead,
 			prometheus.CounterValue,
@@ -141,10 +136,7 @@ func (PGStatIOUserTablesCollector) Update(ctx context.Context, instance *instanc
 			datnameLabel, schemanameLabel, relnameLabel,
 		)
 
-		heapBlksHitMetric := 0.0
-		if heapBlksHit.Valid {
-			heapBlksHitMetric = float64(heapBlksHit.Int64)
-		}
+		heapBlksHitMetric := int64CounterValue(heapBlksHit, instance.wrapLargeCounters)
 		ch <- prometheus.MustNewConstMetric(
 			statioUserTablesHeapBlksHit,
 			prometheus.CounterValue,
@@ -152,10 +144,7 @@ func (PGStatIOUserTablesCollector) Update(ctx context.Context, instance *instanc
 			datnameLabel, schemanameLabel, relnameLabel,
 		)
 
-		idxBlksReadMetric := 0.0
-		if idxBlksRead.Valid {
-			idxBlksReadMetric = float64(idxBlksRead.Int64)
-		}
+		idxBlksReadMetric := int64CounterValue(idxBlksRead, instance.wrapLargeCounters)
 		ch <- prometheus.MustNewConstMetric(
 			statioUserTablesIdxBlksRead,
 			prometheus.CounterValue,
@@ -163,10 +152,7 @@ func (PGStatIOUserTablesCollector) Update(ctx context.Context, instance *instanc
 			datnameLabel, schemanameLabel, relnameLabel,
 		)
 
-		idxBlksHitMetric := 0.0
-		if idxBlksHit.Valid {
-			idxBlksHitMetric = float64(idxBlksHit.Int64)
-		}
+		idxBlksHitMetric := int64CounterValue(idxBlksHit, instance.wrapLargeCounters)
 		ch <- prometheus.MustNewConstMetric(
 			statioUserTablesIdxBlksHit,
 			prometheus.CounterValue,
@@ -174,10 +160,7 @@ func (PGStatIOUserTablesCollector) Update(ctx context.Context, instance *instanc
 			datnameLabel, schemanameLabel, relnameLabel,
 		)
 
-		toastBlksReadMetric := 0.0
-		if toastBlksRead.Valid {
-			toastBlksReadMetric = float64(toastBlksRead.Int64)
-		}
+		toastBlksReadMetric := int64CounterValue(toastBlksRead, instance.wrapLargeCounters)
 		ch <- prometheus.MustNewConstMetric(
 			statioUserTablesToastBlksRead,
 			prometheus.CounterValue,
@@ -185,10 +168,7 @@ func (PGStatIOUserTablesCollector) Update(ctx context.Context, instance *instanc
 			datnameLabel, schemanameLabel, relnameLabel,
 		)
 
-		toastBlksHitMetric := 0.0
-		if toastBlksHit.Valid {
-			toastBlksHitMetric = float64(toastBlksHit.Int64)
-		}
+		toastBlksHitMetric := int64CounterValue(toastBlksHit, instance.wrapLargeCounters)
 		ch <- prometheus.MustNewConstMetric(
 			statioUserTablesToastBlksHit,
 			prometheus.CounterValue,
@@ -196,10 +176,7 @@ func (PGStatIOUserTablesCollector) Update(ctx context.Context, instance *instanc
 			datnameLabel, schemanameLabel, relnameLabel,
 		)
 
-		tidxBlksReadMetric := 0.0
-		if tidxBlksRead.Valid {
-			tidxBlksReadMetric = float64(tidxBlksRead.Int64)
-		}
+		tidxBlksReadMetric := int64CounterValue(tidxBlksRead, instance.wrapLargeCounters)
 		ch <- prometheus.MustNewConstMetric(
 			statioUserTablesTidxBlksRead,
 			prometheus.CounterValue,
@@ -207,10 +184,7 @@ func (PGStatIOUserTablesCollector) Update(ctx context.Context, instance *instanc
 			datnameLabel, schemanameLabel, relnameLabel,
 		)
 
-		tidxBlksHitMetric := 0.0
-		if tidxBlksHit.Valid {
-			tidxBlksHitMetric = float64(tidxBlksHit.Int64)
-		}
+		tidxBlksHitMetric := int64CounterValue(tidxBlksHit, instance.wrapLargeCounters)
 		ch <- prometheus.MustNewConstMetric(
 			statioUserTablesTidxBlksHit,
 			prometheus.CounterValue,
@@ -218,5 +192,6 @@ func (PGStatIOUserTablesCollector) Update(ctx context.Context, instance *instanc
 			datnameLabel, schemanameLabel, relnameLabel,
 		)
 	}
+
 	return rows.Err()
 }

@@ -14,31 +14,248 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"io"
+	"log/slog"
+	"maps"
 	"os"
+	"slices"
 	"sync"
+	"time"
 
-	"github.com/go-kit/log"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
 	"gopkg.in/yaml.v3"
 )
 
-var (
-	configReloadSuccess = promauto.NewGauge(prometheus.GaugeOpts{
-		Namespace: "postgres_exporter",
-		Name:      "config_last_reload_successful",
-		Help:      "Postgres exporter config loaded successfully.",
-	})
+const (
+	DefaultMetricPrefix      string        = "pg"
+	DefaultCollectionTimeout time.Duration = time.Minute
 
-	configReloadSeconds = promauto.NewGauge(prometheus.GaugeOpts{
-		Namespace: "postgres_exporter",
-		Name:      "config_last_reload_success_timestamp_seconds",
-		Help:      "Timestamp of the last successful configuration reload.",
-	})
+	DefaultLongRunningTransactionsThreshold time.Duration = time.Minute
+
+	// DefaultAutoDiscoverDatabasesMaxConcurrency bounds how many discovered
+	// databases are scraped concurrently, so a server with many databases
+	// cannot make a single scrape open more connections than it can spare.
+	DefaultAutoDiscoverDatabasesMaxConcurrency int = 10
+
+	DefaultPGStatStatementsIncludeQuery bool = false
+	DefaultPGStatStatementsQueryLength  uint = 120
+	DefaultPGStatStatementsLimit        uint = 100
+)
+
+const (
+	CollectorBuffercacheSummary      = "buffercache_summary"
+	CollectorDatabase                = "database"
+	CollectorDatabaseWraparound      = "database_wraparound"
+	CollectorLocks                   = "locks"
+	CollectorLongRunningTransactions = "long_running_transactions"
+	CollectorPostmaster              = "postmaster"
+	CollectorProcessIdle             = "process_idle"
+	CollectorReplication             = "replication"
+	CollectorReplicationSlots        = "replication_slots"
+	CollectorRoles                   = "roles"
+	CollectorSettings                = "settings"
+	CollectorStatActivity            = "stat_activity"
+	CollectorStatActivityAutovacuum  = "stat_activity_autovacuum"
+	CollectorStatArchiver            = "stat_archiver"
+	CollectorStatBGWriter            = "stat_bgwriter"
+	CollectorStatCheckpointer        = "stat_checkpointer"
+	CollectorStatDatabase            = "stat_database"
+	CollectorStatProgressVacuum      = "stat_progress_vacuum"
+	CollectorStatReplication         = "stat_replication"
+	CollectorStatStatements          = "stat_statements"
+	CollectorStatUserTables          = "stat_user_tables"
+	CollectorStatWalReceiver         = "stat_wal_receiver"
+	CollectorStatioUserIndexes       = "statio_user_indexes"
+	CollectorStatioUserTables        = "statio_user_tables"
+	CollectorWal                     = "wal"
+	CollectorXlogLocation            = "xlog_location"
+
+	// Amazon Aurora PostgreSQL collectors.
+	CollectorAuroraGlobalDBInstanceStatus  = "aurora_global_db_instance_status"
+	CollectorAuroraGlobalDBStatus          = "aurora_global_db_status"
+	CollectorAuroraInstance                = "aurora_instance"
+	CollectorAuroraReplicaStatus           = "aurora_replica_status"
+	CollectorAuroraStatBgwriter            = "aurora_stat_bgwriter"
+	CollectorAuroraStatDatabase            = "aurora_stat_database"
+	CollectorAuroraStatDMLActivity         = "aurora_stat_dml_activity"
+	CollectorAuroraStatGetDBCommitLatency  = "aurora_stat_get_db_commit_latency"
+	CollectorAuroraStatLogicalWalCache     = "aurora_stat_logical_wal_cache"
+	CollectorAuroraStatOptimizedReadsCache = "aurora_stat_optimized_reads_cache"
 )
 
 type Config struct {
+	DataSourceNames       []string
+	MetricPrefix          string
+	CollectionTimeout     time.Duration
+	WrapLargeCounters     bool
+	DisableDefaultMetrics bool
+	AutoDiscoverDatabases bool
+	// AutoDiscoverDatabasesMaxConcurrency bounds how many discovered
+	// databases are scraped concurrently when AutoDiscoverDatabases is set.
+	AutoDiscoverDatabasesMaxConcurrency int
+	UserQueriesPath                     string
+	ConstantLabels                      string
+	ExcludeDatabases                    []string
+	IncludeDatabases                    []string
+	Collectors                          map[string]bool
+	LongRunningTransactions             LongRunningTransactionsConfig
+	PGStatStatements                    PGStatStatementsConfig
+	Percona                             PerconaConfig
+}
+
+// ValidatedConfig is the result of a successful Config.Validate call. It holds
+// a private deep copy of the validated Config, so later mutations of the
+// original cannot invalidate it. Consumers that require validated
+// configuration (e.g. collector.NewRuntime) accept this type instead of
+// Config, making validation impossible to skip.
+type ValidatedConfig struct {
+	inner Config
+	ok    bool
+}
+
+// Valid reports whether this value was produced by a successful
+// Config.Validate call. It only returns false for zero-value ValidatedConfig
+// structs that bypassed validation.
+func (v ValidatedConfig) Valid() bool {
+	return v.ok
+}
+
+// Config returns a deep copy of the validated configuration. Mutating the
+// returned value does not affect the validated state.
+func (v ValidatedConfig) Config() Config {
+	return v.inner.clone()
+}
+
+type PGStatStatementsConfig struct {
+	IncludeQuery     bool
+	QueryLength      uint
+	Limit            uint
+	ExcludeDatabases []string
+	ExcludeUsers     []string
+}
+
+type LongRunningTransactionsConfig struct {
+	Threshold time.Duration
+}
+
+func NewConfigWithDefaults() Config {
+	return Config{
+		MetricPrefix:                        DefaultMetricPrefix,
+		CollectionTimeout:                   DefaultCollectionTimeout,
+		WrapLargeCounters:                   true,
+		AutoDiscoverDatabasesMaxConcurrency: DefaultAutoDiscoverDatabasesMaxConcurrency,
+		Collectors:                          DefaultCollectorConfig(),
+		LongRunningTransactions: LongRunningTransactionsConfig{
+			Threshold: DefaultLongRunningTransactionsThreshold,
+		},
+		PGStatStatements: PGStatStatementsConfig{
+			IncludeQuery: DefaultPGStatStatementsIncludeQuery,
+			QueryLength:  DefaultPGStatStatementsQueryLength,
+			Limit:        DefaultPGStatStatementsLimit,
+		},
+	}
+}
+
+// Validate checks the configuration and, on success, returns a
+// ValidatedConfig holding a deep copy of it. Validation runs against the copy,
+// so concurrent mutations of the caller's Config cannot affect the outcome.
+func (c Config) Validate() (ValidatedConfig, error) {
+	c = c.clone()
+
+	if c.MetricPrefix == "" {
+		return ValidatedConfig{}, fmt.Errorf("metric prefix must not be empty")
+	}
+	if c.CollectionTimeout <= 0 {
+		return ValidatedConfig{}, fmt.Errorf("collection timeout must be greater than zero")
+	}
+	if c.LongRunningTransactions.Threshold <= 0 {
+		return ValidatedConfig{}, fmt.Errorf("long running transactions threshold must be greater than zero")
+	}
+	if c.AutoDiscoverDatabases && c.AutoDiscoverDatabasesMaxConcurrency <= 0 {
+		return ValidatedConfig{}, fmt.Errorf("auto-discover-databases max concurrency must be greater than zero")
+	}
+	for i, dsn := range c.DataSourceNames {
+		if dsn == "" {
+			return ValidatedConfig{}, fmt.Errorf("data source name at index %d must not be empty", i)
+		}
+	}
+	if c.PGStatStatements.QueryLength <= 0 {
+		return ValidatedConfig{}, fmt.Errorf("pg_stat_statements query length must be greater than zero")
+	}
+	if c.PGStatStatements.Limit <= 0 {
+		return ValidatedConfig{}, fmt.Errorf("pg_stat_statements limit must be greater than zero")
+	}
+	for name := range c.Collectors {
+		if name == "" {
+			return ValidatedConfig{}, fmt.Errorf("collector name must not be empty")
+		}
+		if _, ok := DefaultCollectorConfig()[name]; !ok {
+			return ValidatedConfig{}, fmt.Errorf("unknown collector %q", name)
+		}
+	}
+
+	return ValidatedConfig{inner: c, ok: true}, nil
+}
+
+// clone returns a copy of the Config with all reference-bearing fields
+// (slices and maps) deep-copied, so the copy shares no mutable state with the
+// original.
+func (c Config) clone() Config {
+	c.DataSourceNames = slices.Clone(c.DataSourceNames)
+	c.ExcludeDatabases = slices.Clone(c.ExcludeDatabases)
+	c.IncludeDatabases = slices.Clone(c.IncludeDatabases)
+	c.Collectors = maps.Clone(c.Collectors)
+	c.PGStatStatements.ExcludeDatabases = slices.Clone(c.PGStatStatements.ExcludeDatabases)
+	c.PGStatStatements.ExcludeUsers = slices.Clone(c.PGStatStatements.ExcludeUsers)
+	return c
+}
+
+func DefaultCollectorConfig() map[string]bool {
+	return perconaCollectorConfig(map[string]bool{
+		CollectorBuffercacheSummary:      false,
+		CollectorDatabase:                true,
+		CollectorDatabaseWraparound:      false,
+		CollectorLocks:                   true,
+		CollectorLongRunningTransactions: false,
+		CollectorPostmaster:              false,
+		CollectorProcessIdle:             false,
+		CollectorReplication:             true,
+		CollectorReplicationSlots:        true,
+		CollectorRoles:                   true,
+		CollectorSettings:                true,
+		CollectorStatActivity:            true,
+		CollectorStatActivityAutovacuum:  false,
+		CollectorStatArchiver:            true,
+		CollectorStatBGWriter:            true,
+		CollectorStatCheckpointer:        false,
+		CollectorStatDatabase:            true,
+		CollectorStatProgressVacuum:      true,
+		CollectorStatReplication:         true,
+		CollectorStatStatements:          false,
+		CollectorStatUserTables:          true,
+		CollectorStatWalReceiver:         false,
+		CollectorStatioUserIndexes:       false,
+		CollectorStatioUserTables:        true,
+		CollectorWal:                     true,
+		CollectorXlogLocation:            false,
+
+		// Amazon Aurora PostgreSQL collectors.
+		CollectorAuroraGlobalDBInstanceStatus:  false,
+		CollectorAuroraGlobalDBStatus:          false,
+		CollectorAuroraInstance:                false,
+		CollectorAuroraReplicaStatus:           false,
+		CollectorAuroraStatBgwriter:            false,
+		CollectorAuroraStatDatabase:            false,
+		CollectorAuroraStatDMLActivity:         false,
+		CollectorAuroraStatGetDBCommitLatency:  false,
+		CollectorAuroraStatLogicalWalCache:     false,
+		CollectorAuroraStatOptimizedReadsCache: false,
+	})
+}
+
+type AuthConfig struct {
 	AuthModules map[string]AuthModule `yaml:"auth_modules"`
 }
 
@@ -56,43 +273,102 @@ type UserPass struct {
 
 type Handler struct {
 	sync.RWMutex
-	Config *Config
+	Config *AuthConfig
+
+	configReloadSuccess prometheus.Gauge
+	configReloadSeconds prometheus.Gauge
 }
 
-func (ch *Handler) GetConfig() *Config {
+func NewHandler(registerer prometheus.Registerer) (*Handler, error) {
+	if registerer == nil {
+		return nil, errors.New("registerer is required")
+	}
+	h := &Handler{
+		Config: &AuthConfig{},
+		configReloadSuccess: prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: "postgres_exporter",
+			Name:      "config_last_reload_successful",
+			Help:      "Postgres exporter config loaded successfully.",
+		}),
+		configReloadSeconds: prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: "postgres_exporter",
+			Name:      "config_last_reload_success_timestamp_seconds",
+			Help:      "Timestamp of the last successful configuration reload.",
+		}),
+	}
+	registerer.MustRegister(h.configReloadSuccess, h.configReloadSeconds)
+
+	return h, nil
+}
+
+func (ch *Handler) GetAuthConfig() *AuthConfig {
 	ch.RLock()
 	defer ch.RUnlock()
 	return ch.Config
 }
 
-func (ch *Handler) ReloadConfig(f string, logger log.Logger) error {
-	config := &Config{}
+func (ch *Handler) ReloadAuthConfig(f string, logger *slog.Logger) error {
 	var err error
 	defer func() {
-		if err != nil {
-			configReloadSuccess.Set(0)
-		} else {
-			configReloadSuccess.Set(1)
-			configReloadSeconds.SetToCurrentTime()
-		}
+		ch.observeReload(err)
 	}()
+
+	config, err := LoadAuthConfig(f)
+	if err != nil {
+		return err
+	}
+
+	ch.SetAuthConfig(config)
+	return nil
+}
+
+func (ch *Handler) observeReload(err error) {
+	if ch.configReloadSuccess == nil {
+		return
+	}
+	if err != nil {
+		ch.configReloadSuccess.Set(0)
+		return
+	}
+	ch.configReloadSuccess.Set(1)
+	if ch.configReloadSeconds != nil {
+		ch.configReloadSeconds.SetToCurrentTime()
+	}
+}
+
+func LoadAuthConfig(f string) (*AuthConfig, error) {
+	if f == "" {
+		return &AuthConfig{}, nil
+	}
 
 	yamlReader, err := os.Open(f)
 	if err != nil {
-		return fmt.Errorf("error opening config file %q: %s", f, err)
+		return nil, fmt.Errorf("error opening config file %q: %s", f, err)
 	}
 	defer yamlReader.Close()
-	decoder := yaml.NewDecoder(yamlReader)
+
+	config, err := DecodeAuthConfig(yamlReader)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing config file %q: %s", f, err)
+	}
+	return config, nil
+}
+
+func DecodeAuthConfig(r io.Reader) (*AuthConfig, error) {
+	config := &AuthConfig{}
+	decoder := yaml.NewDecoder(r)
 	decoder.KnownFields(true)
 
-	if err = decoder.Decode(config); err != nil {
-		return fmt.Errorf("error parsing config file %q: %s", f, err)
+	if err := decoder.Decode(config); err != nil {
+		return nil, err
 	}
+	return config, nil
+}
 
+func (ch *Handler) SetAuthConfig(config *AuthConfig) {
 	ch.Lock()
 	ch.Config = config
 	ch.Unlock()
-	return nil
 }
 
 func (m AuthModule) ConfigureTarget(target string) (DSN, error) {

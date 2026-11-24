@@ -3,13 +3,15 @@ package collector
 import (
 	"context"
 	"database/sql"
-	"github.com/go-kit/log"
-	"github.com/prometheus/client_golang/prometheus"
+	"log/slog"
 	"strconv"
+
+	"github.com/percona/postgres_exporter/config"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 func init() {
-	registerCollector("extensions", defaultEnabled, NewExtensionsCollector)
+	registerCollector(config.CollectorExtensions, serverScope, NewExtensionsCollector)
 }
 
 var pgExtensions = map[string]*prometheus.Desc{
@@ -36,7 +38,7 @@ var pgExtensions = map[string]*prometheus.Desc{
 }
 
 type ExtensionsCollector struct {
-	logger log.Logger
+	logger *slog.Logger
 }
 
 func NewExtensionsCollector(collectorConfig collectorConfig) (Collector, error) {

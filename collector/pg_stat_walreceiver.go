@@ -16,22 +16,18 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 
-	"github.com/go-kit/log"
-	"github.com/go-kit/log/level"
-	"github.com/percona/postgres_exporter/distribution"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
 func init() {
-	registerCollector(statWalReceiverSubsystem, defaultDisabled, NewPGStatWalReceiverCollector)
+	registerCollector(statWalReceiverSubsystem, serverScope, NewPGStatWalReceiverCollector)
 }
 
 type PGStatWalReceiverCollector struct {
-	log log.Logger
+	log *slog.Logger
 }
-
-const statWalReceiverSubsystem = "stat_wal_receiver"
 
 func NewPGStatWalReceiverCollector(config collectorConfig) (Collector, error) {
 	return &PGStatWalReceiverCollector{log: config.logger}, nil
@@ -110,7 +106,7 @@ var (
 		status,
 		(receive_start_lsn- '0/0') %% (2^52)::bigint as receive_start_lsn,
 		%s
-receive_start_tli,
+		receive_start_tli,
 		received_tli,
 		extract(epoch from last_msg_send_time) as last_msg_send_time,
 		extract(epoch from last_msg_receipt_time) as last_msg_receipt_time,
@@ -123,8 +119,8 @@ receive_start_tli,
 
 func (c *PGStatWalReceiverCollector) Update(ctx context.Context, instance *instance, ch chan<- prometheus.Metric) error {
 	db := instance.getDB()
-	// Skip Aurora instances (not supported pg_stat_get_wal_receiver)
-	if distribution.IsAurora(instance.dsn, db) {
+	// pg_stat_get_wal_receiver is not supported on Aurora.
+	if instance.isAurora {
 		return nil
 	}
 
@@ -154,7 +150,7 @@ func (c *PGStatWalReceiverCollector) Update(ctx context.Context, instance *insta
 		var lastMsgSendTime, lastMsgReceiptTime, latestEndTime sql.NullFloat64
 
 		if hasFlushedLSN {
-			if err := rows.Scan(&upstreamHost, &slotName, &status, &receiveStartLsn, &receiveStartTli, &flushedLsn, &receivedTli, &lastMsgSendTime, &lastMsgReceiptTime, &latestEndLsn, &latestEndTime, &upstreamNode); err != nil {
+			if err := rows.Scan(&upstreamHost, &slotName, &status, &receiveStartLsn, &flushedLsn, &receiveStartTli, &receivedTli, &lastMsgSendTime, &lastMsgReceiptTime, &latestEndLsn, &latestEndTime, &upstreamNode); err != nil {
 				return err
 			}
 		} else {
@@ -163,76 +159,72 @@ func (c *PGStatWalReceiverCollector) Update(ctx context.Context, instance *insta
 			}
 		}
 		if !upstreamHost.Valid {
-			level.Debug(c.log).Log("msg", "Skipping wal receiver stats because upstream host is null")
+			c.log.Debug("Skipping wal receiver stats because upstream host is null")
 			continue
 		}
 
 		if !slotName.Valid {
-			level.Debug(c.log).Log("msg", "Skipping wal receiver stats because slotname host is null")
+			c.log.Debug("Skipping wal receiver stats because slotname host is null")
 			continue
 		}
 
 		if !status.Valid {
-			level.Debug(c.log).Log("msg", "Skipping wal receiver stats because status is null")
+			c.log.Debug("Skipping wal receiver stats because status is null")
 			continue
 		}
 		labels := []string{upstreamHost.String, slotName.String, status.String}
 
 		if !receiveStartLsn.Valid {
-			level.Debug(c.log).Log("msg", "Skipping wal receiver stats because receive_start_lsn is null")
+			c.log.Debug("Skipping wal receiver stats because receive_start_lsn is null")
 			continue
 		}
 		if !receiveStartTli.Valid {
-			level.Debug(c.log).Log("msg", "Skipping wal receiver stats because receive_start_tli is null")
+			c.log.Debug("Skipping wal receiver stats because receive_start_tli is null")
 			continue
 		}
 		if hasFlushedLSN && !flushedLsn.Valid {
-			level.Debug(c.log).Log("msg", "Skipping wal receiver stats because flushed_lsn is null")
+			c.log.Debug("Skipping wal receiver stats because flushed_lsn is null")
 			continue
 		}
 		if !receivedTli.Valid {
-			level.Debug(c.log).Log("msg", "Skipping wal receiver stats because received_tli is null")
+			c.log.Debug("Skipping wal receiver stats because received_tli is null")
 			continue
 		}
 		if !lastMsgSendTime.Valid {
-			level.Debug(c.log).Log("msg", "Skipping wal receiver stats because last_msg_send_time is null")
+			c.log.Debug("Skipping wal receiver stats because last_msg_send_time is null")
 			continue
 		}
 		if !lastMsgReceiptTime.Valid {
-			level.Debug(c.log).Log("msg", "Skipping wal receiver stats because last_msg_receipt_time is null")
+			c.log.Debug("Skipping wal receiver stats because last_msg_receipt_time is null")
 			continue
 		}
 		if !latestEndLsn.Valid {
-			level.Debug(c.log).Log("msg", "Skipping wal receiver stats because latest_end_lsn is null")
+			c.log.Debug("Skipping wal receiver stats because latest_end_lsn is null")
 			continue
 		}
 		if !latestEndTime.Valid {
-			level.Debug(c.log).Log("msg", "Skipping wal receiver stats because latest_end_time is null")
-			continue
-		}
-		if !upstreamNode.Valid {
-			level.Debug(c.log).Log("msg", "Skipping wal receiver stats because upstream_node is null")
+			c.log.Debug("Skipping wal receiver stats because latest_end_time is null")
 			continue
 		}
 		ch <- prometheus.MustNewConstMetric(
 			statWalReceiverReceiveStartLsn,
 			prometheus.CounterValue,
-			float64(receiveStartLsn.Int64),
-			labels...)
-
-		ch <- prometheus.MustNewConstMetric(
-			statWalReceiverReceiveStartTli,
-			prometheus.GaugeValue,
-			float64(receiveStartTli.Int64),
+			int64CounterValue(receiveStartLsn, instance.wrapLargeCounters),
 			labels...)
 
 		if hasFlushedLSN {
 			ch <- prometheus.MustNewConstMetric(
 				statWalReceiverFlushedLSN,
 				prometheus.CounterValue,
-				float64(flushedLsn.Int64),
+				int64CounterValue(flushedLsn, instance.wrapLargeCounters),
 				labels...)
 		}
+
+		ch <- prometheus.MustNewConstMetric(
+			statWalReceiverReceiveStartTli,
+			prometheus.GaugeValue,
+			float64(receiveStartTli.Int64),
+			labels...)
 
 		ch <- prometheus.MustNewConstMetric(
 			statWalReceiverReceivedTli,
@@ -255,7 +247,7 @@ func (c *PGStatWalReceiverCollector) Update(ctx context.Context, instance *insta
 		ch <- prometheus.MustNewConstMetric(
 			statWalReceiverLatestEndLsn,
 			prometheus.CounterValue,
-			float64(latestEndLsn.Int64),
+			int64CounterValue(latestEndLsn, instance.wrapLargeCounters),
 			labels...)
 
 		ch <- prometheus.MustNewConstMetric(
@@ -264,14 +256,16 @@ func (c *PGStatWalReceiverCollector) Update(ctx context.Context, instance *insta
 			latestEndTime.Float64,
 			labels...)
 
-		ch <- prometheus.MustNewConstMetric(
-			statWalReceiverUpstreamNode,
-			prometheus.GaugeValue,
-			float64(upstreamNode.Int64),
-			labels...)
+		if !upstreamNode.Valid {
+			c.log.Debug("Skipping wal receiver stats upstream_node because it is null")
+		} else {
+			ch <- prometheus.MustNewConstMetric(
+				statWalReceiverUpstreamNode,
+				prometheus.GaugeValue,
+				float64(upstreamNode.Int64),
+				labels...)
+		}
 	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	return nil
+
+	return rows.Err()
 }

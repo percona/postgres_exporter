@@ -14,23 +14,295 @@
 package config
 
 import (
+	"strings"
 	"testing"
+	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
-func TestLoadConfig(t *testing.T) {
-	ch := &Handler{
-		Config: &Config{},
+func TestNewConfigWithDefaults(t *testing.T) {
+	cfg := NewConfigWithDefaults()
+
+	if got, want := cfg.MetricPrefix, DefaultMetricPrefix; got != want {
+		t.Fatalf("MetricPrefix = %q, want %q", got, want)
+	}
+	if got, want := cfg.CollectionTimeout, DefaultCollectionTimeout; got != want {
+		t.Fatalf("CollectionTimeout = %v, want %v", got, want)
+	}
+	if got, want := cfg.LongRunningTransactions.Threshold, DefaultLongRunningTransactionsThreshold; got != want {
+		t.Fatalf("LongRunningTransactions.Threshold = %v, want %v", got, want)
+	}
+	if got, want := cfg.AutoDiscoverDatabasesMaxConcurrency, DefaultAutoDiscoverDatabasesMaxConcurrency; got != want {
+		t.Fatalf("AutoDiscoverDatabasesMaxConcurrency = %v, want %v", got, want)
+	}
+	if !cfg.WrapLargeCounters {
+		t.Fatal("WrapLargeCounters = false, want true")
+	}
+	if cfg.DisableDefaultMetrics {
+		t.Fatal("DisableDefaultMetrics = true, want false")
+	}
+	if got, want := cfg.PGStatStatements.IncludeQuery, DefaultPGStatStatementsIncludeQuery; got != want {
+		t.Fatalf("PGStatStatements.IncludeQuery = %t, want %t", got, want)
+	}
+	if len(cfg.Collectors) == 0 {
+		t.Fatal("Collectors is empty, want default collector config")
+	}
+	if got, want := cfg.Collectors[CollectorDatabase], true; got != want {
+		t.Fatalf("Collectors[%q] = %t, want %t", CollectorDatabase, got, want)
+	}
+	if got, want := cfg.Collectors[CollectorStatStatements], false; got != want {
+		t.Fatalf("Collectors[%q] = %t, want %t", CollectorStatStatements, got, want)
+	}
+}
+
+func TestConfigValidate(t *testing.T) {
+	cfg := NewConfigWithDefaults()
+	cfg.DataSourceNames = []string{"postgresql://localhost:5432/postgres?sslmode=disable"}
+
+	validated, err := cfg.Validate()
+	if err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+	if !validated.Valid() {
+		t.Fatal("Valid() = false after successful Validate, want true")
+	}
+	if got, want := validated.Config().MetricPrefix, cfg.MetricPrefix; got != want {
+		t.Fatalf("Config().MetricPrefix = %q, want %q", got, want)
+	}
+}
+
+func TestValidatedConfigZeroValueIsInvalid(t *testing.T) {
+	var validated ValidatedConfig
+	if validated.Valid() {
+		t.Fatal("Valid() = true for zero-value ValidatedConfig, want false")
+	}
+}
+
+func TestValidatedConfigIsIsolatedFromOriginal(t *testing.T) {
+	cfg := NewConfigWithDefaults()
+	cfg.DataSourceNames = []string{"postgresql://localhost:5432/postgres?sslmode=disable"}
+	cfg.PGStatStatements.ExcludeDatabases = []string{"template0"}
+
+	validated, err := cfg.Validate()
+	if err != nil {
+		t.Fatalf("Validate() error = %v", err)
 	}
 
-	err := ch.ReloadConfig("testdata/config-good.yaml", nil)
+	cfg.Collectors[CollectorDatabase] = false
+	cfg.DataSourceNames[0] = "mutated"
+	cfg.PGStatStatements.ExcludeDatabases[0] = "mutated"
+
+	got := validated.Config()
+	if !got.Collectors[CollectorDatabase] {
+		t.Fatalf("Collectors[%q] = false after mutating original, want true", CollectorDatabase)
+	}
+	if want := "postgresql://localhost:5432/postgres?sslmode=disable"; got.DataSourceNames[0] != want {
+		t.Fatalf("DataSourceNames[0] = %q after mutating original, want %q", got.DataSourceNames[0], want)
+	}
+	if want := "template0"; got.PGStatStatements.ExcludeDatabases[0] != want {
+		t.Fatalf("PGStatStatements.ExcludeDatabases[0] = %q after mutating original, want %q", got.PGStatStatements.ExcludeDatabases[0], want)
+	}
+}
+
+func TestValidatedConfigAccessorReturnsCopy(t *testing.T) {
+	cfg := NewConfigWithDefaults()
+
+	validated, err := cfg.Validate()
 	if err != nil {
-		t.Errorf("Error loading config: %s", err)
+		t.Fatalf("Validate() error = %v", err)
+	}
+
+	first := validated.Config()
+	first.Collectors[CollectorDatabase] = false
+
+	second := validated.Config()
+	if !second.Collectors[CollectorDatabase] {
+		t.Fatalf("Collectors[%q] = false after mutating a previous copy, want true", CollectorDatabase)
+	}
+}
+
+func TestConfigValidateFailures(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*Config)
+		want   string
+	}{
+		{
+			name: "empty metric prefix",
+			mutate: func(cfg *Config) {
+				cfg.MetricPrefix = ""
+			},
+			want: "metric prefix must not be empty",
+		},
+		{
+			name: "zero collection timeout",
+			mutate: func(cfg *Config) {
+				cfg.CollectionTimeout = 0
+			},
+			want: "collection timeout must be greater than zero",
+		},
+		{
+			name: "zero long running transactions threshold",
+			mutate: func(cfg *Config) {
+				cfg.LongRunningTransactions.Threshold = 0
+			},
+			want: "long running transactions threshold must be greater than zero",
+		},
+		{
+			name: "empty data source",
+			mutate: func(cfg *Config) {
+				cfg.DataSourceNames = []string{"postgresql://localhost:5432/postgres", ""}
+			},
+			want: "data source name at index 1 must not be empty",
+		},
+		{
+			name: "zero auto-discover-databases max concurrency when enabled",
+			mutate: func(cfg *Config) {
+				cfg.AutoDiscoverDatabases = true
+				cfg.AutoDiscoverDatabasesMaxConcurrency = 0
+			},
+			want: "auto-discover-databases max concurrency must be greater than zero",
+		},
+		{
+			name: "zero pg_stat_statements query length",
+			mutate: func(cfg *Config) {
+				cfg.PGStatStatements.QueryLength = 0
+			},
+			want: "pg_stat_statements query length must be greater than zero",
+		},
+		{
+			name: "zero pg_stat_statements limit",
+			mutate: func(cfg *Config) {
+				cfg.PGStatStatements.Limit = 0
+			},
+			want: "pg_stat_statements limit must be greater than zero",
+		},
+		{
+			name: "empty collector name",
+			mutate: func(cfg *Config) {
+				cfg.Collectors[""] = true
+			},
+			want: "collector name must not be empty",
+		},
+		{
+			name: "unknown collector name",
+			mutate: func(cfg *Config) {
+				cfg.Collectors["does_not_exist"] = true
+			},
+			want: `unknown collector "does_not_exist"`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := NewConfigWithDefaults()
+			cfg.DataSourceNames = []string{"postgresql://localhost:5432/postgres?sslmode=disable"}
+			test.mutate(&cfg)
+
+			validated, err := cfg.Validate()
+			if err == nil || err.Error() != test.want {
+				t.Fatalf("Validate() error = %v, want %q", err, test.want)
+			}
+			if validated.Valid() {
+				t.Fatal("Valid() = true after failed Validate, want false")
+			}
+		})
+	}
+}
+
+func TestConfigValidateAcceptsNoDataSourcesForMultiTargetMode(t *testing.T) {
+	cfg := NewConfigWithDefaults()
+	if _, err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+}
+
+func TestConfigValidateAcceptsCustomTimeout(t *testing.T) {
+	cfg := NewConfigWithDefaults()
+	cfg.CollectionTimeout = 30 * time.Second
+	if _, err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+}
+
+// TestConfigValidateIgnoresMaxConcurrencyWhenDiscoveryDisabled ensures a zero
+// AutoDiscoverDatabasesMaxConcurrency is only rejected when
+// AutoDiscoverDatabases is actually enabled: it is meaningless otherwise.
+func TestConfigValidateIgnoresMaxConcurrencyWhenDiscoveryDisabled(t *testing.T) {
+	cfg := NewConfigWithDefaults()
+	cfg.AutoDiscoverDatabasesMaxConcurrency = 0
+	if _, err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+}
+
+func TestLoadAuthConfigFile(t *testing.T) {
+	config, err := LoadAuthConfig("testdata/config-good.yaml")
+	if err != nil {
+		t.Fatalf("LoadAuthConfig() error = %v", err)
+	}
+	if len(config.AuthModules) == 0 {
+		t.Fatal("LoadAuthConfig() loaded no auth modules")
+	}
+}
+
+func TestLoadAuthConfigEmptyPath(t *testing.T) {
+	config, err := LoadAuthConfig("")
+	if err != nil {
+		t.Fatalf("LoadAuthConfig() error = %v", err)
+	}
+	if config == nil {
+		t.Fatal("LoadAuthConfig() config = nil, want empty config")
+	}
+	if len(config.AuthModules) != 0 {
+		t.Fatalf("LoadAuthConfig() loaded %d auth modules, want 0", len(config.AuthModules))
+	}
+}
+
+func TestDecodeAuthConfig(t *testing.T) {
+	config, err := DecodeAuthConfig(strings.NewReader(`
+auth_modules:
+  module:
+    type: userpass
+    userpass:
+      username: user
+      password: pass
+`))
+	if err != nil {
+		t.Fatalf("DecodeAuthConfig() error = %v", err)
+	}
+	if got, want := config.AuthModules["module"].UserPass.Username, "user"; got != want {
+		t.Fatalf("username = %q, want %q", got, want)
+	}
+}
+
+func TestReloadAuthConfig(t *testing.T) {
+	ch, err := NewHandler(prometheus.NewRegistry())
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+
+	if err := ch.ReloadAuthConfig("testdata/config-good.yaml", nil); err != nil {
+		t.Errorf("error loading config: %s", err)
+	}
+}
+
+func TestNewHandlerRequiresRegisterer(t *testing.T) {
+	handler, err := NewHandler(nil)
+	if err == nil {
+		t.Fatal("NewHandler() error = nil, want error")
+	}
+	if handler != nil {
+		t.Fatalf("NewHandler() handler = %v, want nil", handler)
 	}
 }
 
 func TestLoadBadConfigs(t *testing.T) {
-	ch := &Handler{
-		Config: &Config{},
+	ch, err := NewHandler(prometheus.NewRegistry())
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
 	}
 
 	tests := []struct {
@@ -49,10 +321,67 @@ func TestLoadBadConfigs(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.input, func(t *testing.T) {
-			got := ch.ReloadConfig(test.input, nil)
+			got := ch.ReloadAuthConfig(test.input, nil)
 			if got == nil || got.Error() != test.want {
-				t.Fatalf("ReloadConfig(%q) = %v, want %s", test.input, got, test.want)
+				t.Fatalf("ReloadAuthConfig(%q) = %v, want %s", test.input, got, test.want)
 			}
 		})
+	}
+}
+
+func TestReloadAuthConfigPreservesLastKnownGoodConfig(t *testing.T) {
+	ch, err := NewHandler(prometheus.NewRegistry())
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+
+	if err := ch.ReloadAuthConfig("testdata/config-good.yaml", nil); err != nil {
+		t.Fatalf("ReloadAuthConfig() initial load error = %v", err)
+	}
+
+	before := ch.GetAuthConfig()
+	if got, want := before.AuthModules["first"].UserPass.Username, "first"; got != want {
+		t.Fatalf("username before failed reload = %q, want %q", got, want)
+	}
+
+	if err := ch.ReloadAuthConfig("testdata/config-bad-auth-module.yaml", nil); err == nil {
+		t.Fatal("ReloadAuthConfig() error = nil, want error")
+	}
+
+	after := ch.GetAuthConfig()
+	if got, want := after.AuthModules["first"].UserPass.Username, "first"; got != want {
+		t.Fatalf("username after failed reload = %q, want %q", got, want)
+	}
+}
+
+func TestReloadAuthConfigMetrics(t *testing.T) {
+	ch, err := NewHandler(prometheus.NewRegistry())
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+
+	if err := ch.ReloadAuthConfig("testdata/config-good.yaml", nil); err != nil {
+		t.Fatalf("ReloadAuthConfig() error = %v", err)
+	}
+
+	if got, want := testutil.ToFloat64(ch.configReloadSuccess), float64(1); got != want {
+		t.Fatalf("config reload success = %v, want %v", got, want)
+	}
+
+	successTimestamp := testutil.ToFloat64(ch.configReloadSeconds)
+	if successTimestamp == 0 {
+		t.Fatal("config reload success timestamp = 0, want non-zero")
+	}
+
+	if err := ch.ReloadAuthConfig("testdata/config-bad-auth-module.yaml", nil); err == nil {
+		t.Fatal("ReloadAuthConfig() error = nil, want error")
+	}
+
+	if got, want := testutil.ToFloat64(ch.configReloadSuccess), float64(0); got != want {
+		t.Fatalf("config reload success after failed reload = %v, want %v", got, want)
+	}
+
+	if got := testutil.ToFloat64(ch.configReloadSeconds); got != successTimestamp {
+		t.Fatalf("config reload success timestamp after failed reload = %v, want %v", got, successTimestamp)
 	}
 }

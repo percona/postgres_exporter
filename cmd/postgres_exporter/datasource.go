@@ -1,4 +1,4 @@
-// Copyright 2021 The Prometheus Authors
+// Copyright The Prometheus Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -17,132 +17,46 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"regexp"
 	"strings"
-
-	"github.com/go-kit/log/level"
-	"github.com/prometheus/client_golang/prometheus"
 )
 
-func (e *Exporter) discoverDatabaseDSNs() []string {
-	// connstring syntax is complex (and not sure if even regular).
-	// we don't need to parse it, so just superficially validate that it starts
-	// with a valid-ish keyword pair
-	connstringRe := regexp.MustCompile(`^ *[a-zA-Z0-9]+ *= *[^= ]+`)
-
-	dsns := make(map[string]struct{})
-	for _, dsn := range e.dsn {
-		var dsnURI *url.URL
-		var dsnConnstring string
-
-		if strings.HasPrefix(dsn, "postgresql://") || strings.HasPrefix(dsn, "postgres://") {
-			var err error
-			dsnURI, err = url.Parse(dsn)
-			if err != nil {
-				level.Error(logger).Log("msg", "Unable to parse DSN as URI", "dsn", loggableDSN(dsn), "err", err)
-				continue
-			}
-		} else if connstringRe.MatchString(dsn) {
-			dsnConnstring = dsn
-		} else {
-			level.Error(logger).Log("msg", "Unable to parse DSN as either URI or connstring", "dsn", loggableDSN(dsn))
-			continue
-		}
-		dsns[dsn] = struct{}{}
-
-		// If autoDiscoverDatabases is true, set first dsn as master database (Default: false)
-		e.masterDSN = dsn
-
-		databaseNames, err := e.getDatabaseNames(dsn)
-		if err != nil {
-			continue
-		}
-
-		for _, databaseName := range databaseNames {
-			if contains(e.excludeDatabases, databaseName) {
-				continue
-			}
-
-			if len(e.includeDatabases) != 0 && !contains(e.includeDatabases, databaseName) {
-				continue
-			}
-
-			if dsnURI != nil {
-				if dsnURI.Host == "" && strings.HasPrefix(dsnURI.Path, "/") {
-					dsnURI.Path = "/" + databaseName
-				} else {
-					dsnURI.Path = databaseName
-				}
-				dsn = dsnURI.String()
-			} else {
-				// replacing one dbname with another is complicated.
-				// just append new dbname to override.
-				dsn = fmt.Sprintf("%s dbname=%s", dsnConnstring, databaseName)
-			}
-			dsns[dsn] = struct{}{}
-		}
-	}
-
-	result := make([]string, len(dsns))
-	index := 0
-	for dsn := range dsns {
-		result[index] = dsn
-		index++
-	}
-
-	return result
+// An empty field falls back to the matching DATA_SOURCE_* env var. User and
+// password have no flag of their own: flags are readable via /proc, so those
+// secrets arrive by env var or through the *File paths.
+type dataSourceOpts struct {
+	URI      string
+	URIFile  string
+	UserFile string
+	PassFile string
 }
 
-func (e *Exporter) getDatabaseNames(dsn string) ([]string, error) {
-	if e.connSema != nil {
-		if err := e.connSema.Acquire(e.ctx, 1); err != nil {
-			level.Warn(logger).Log("msg", "Failed to acquire semaphore", "err", err)
-			return nil, err
+// DATA_SOURCE_NAME/USER/PASS are absent on purpose: they carry secrets, so
+// they get no flag and are not deprecated.
+func warnDeprecatedDataSourceEnvVars() {
+	for envVar, flag := range map[string]string{
+		"DATA_SOURCE_URI":       "--datasource.uri",
+		"DATA_SOURCE_URI_FILE":  "--datasource.uri-file",
+		"DATA_SOURCE_USER_FILE": "--datasource.user-file",
+		"DATA_SOURCE_PASS_FILE": "--datasource.pass-file",
+	} {
+		if os.Getenv(envVar) != "" {
+			logger.Warn("Configuring the data source via environment variable is DEPRECATED", "env", envVar, "flag", flag)
 		}
-		defer e.connSema.Release(1)
 	}
-
-	server, err := e.GetServer(dsn)
-	if err != nil {
-		level.Error(logger).Log("msg", "Error opening connection to database", "dsn", loggableDSN(dsn), "err", err)
-		return nil, err
-	}
-	defer server.Close()
-
-	dbNames, err := queryDatabases(e.ctx, server)
-	if err != nil {
-		level.Error(logger).Log("msg", "Error querying databases", "dsn", loggableDSN(dsn), "err", err)
-		return nil, err
-	}
-
-	return dbNames, nil
 }
 
-func (e *Exporter) scrapeDSN(ch chan<- prometheus.Metric, dsn string) error {
-	server, err := e.GetServer(dsn)
-	if err != nil {
-		return &ErrorConnectToServer{fmt.Sprintf("Error opening connection to database (%s): %s", loggableDSN(dsn), err.Error())}
+func flagOrEnvVar(flagVal, envKey string) string {
+	if flagVal != "" {
+		return flagVal
 	}
-	defer server.Close()
-
-	// Check if autoDiscoverDatabases is false, set dsn as master database (Default: false)
-	if !e.autoDiscoverDatabases || e.masterDSN == dsn {
-		server.master = true
-	}
-
-	// Check if map versions need to be updated
-	if err := e.checkMapVersions(ch, server); err != nil {
-		level.Warn(logger).Log("msg", "Proceeding with outdated query maps, as the Postgres version could not be determined", "err", err)
-	}
-
-	return server.Scrape(ch, e.disableSettingsMetrics)
+	return os.Getenv(envKey)
 }
 
 // try to get the DataSource
 // DATA_SOURCE_NAME always wins so we do not break older versions
 // reading secrets from files wins over secrets in environment variables
 // DATA_SOURCE_NAME > DATA_SOURCE_{USER|PASS}_FILE > DATA_SOURCE_{USER|PASS}
-func getDataSources() ([]string, error) {
+func getDataSources(opts dataSourceOpts) ([]string, error) {
 	var dsn = os.Getenv("DATA_SOURCE_NAME")
 	if len(dsn) != 0 {
 		return strings.Split(dsn, ","), nil
@@ -150,7 +64,7 @@ func getDataSources() ([]string, error) {
 
 	var user, pass, uri string
 
-	dataSourceUserFile := os.Getenv("DATA_SOURCE_USER_FILE")
+	dataSourceUserFile := flagOrEnvVar(opts.UserFile, "DATA_SOURCE_USER_FILE")
 	if len(dataSourceUserFile) != 0 {
 		fileContents, err := os.ReadFile(dataSourceUserFile)
 		if err != nil {
@@ -161,7 +75,7 @@ func getDataSources() ([]string, error) {
 		user = os.Getenv("DATA_SOURCE_USER")
 	}
 
-	dataSourcePassFile := os.Getenv("DATA_SOURCE_PASS_FILE")
+	dataSourcePassFile := flagOrEnvVar(opts.PassFile, "DATA_SOURCE_PASS_FILE")
 	if len(dataSourcePassFile) != 0 {
 		fileContents, err := os.ReadFile(dataSourcePassFile)
 		if err != nil {
@@ -173,15 +87,15 @@ func getDataSources() ([]string, error) {
 	}
 
 	ui := url.UserPassword(user, pass).String()
-	dataSrouceURIFile := os.Getenv("DATA_SOURCE_URI_FILE")
-	if len(dataSrouceURIFile) != 0 {
-		fileContents, err := os.ReadFile(dataSrouceURIFile)
+	dataSourceURIFile := flagOrEnvVar(opts.URIFile, "DATA_SOURCE_URI_FILE")
+	if len(dataSourceURIFile) != 0 {
+		fileContents, err := os.ReadFile(dataSourceURIFile)
 		if err != nil {
-			return nil, fmt.Errorf("failed loading data source URI file %s: %s", dataSrouceURIFile, err.Error())
+			return nil, fmt.Errorf("failed loading data source URI file %s: %s", dataSourceURIFile, err.Error())
 		}
 		uri = strings.TrimSpace(string(fileContents))
 	} else {
-		uri = os.Getenv("DATA_SOURCE_URI")
+		uri = flagOrEnvVar(opts.URI, "DATA_SOURCE_URI")
 	}
 
 	// No datasources found. This allows us to support the multi-target pattern
