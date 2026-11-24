@@ -67,3 +67,22 @@ setup;
 - For mixin changes, edit sources under `postgres_mixin/` and use its Makefile
   to lint and generate outputs. Inspect the resulting diff for unexplained
   generated changes.
+
+## Percona fork
+
+This repository is Percona's fork, built into PMM Client. What only the fork has
+lives in `percona_*.go` files, and upstream's files reach it through one-line
+hooks, so that merging upstream stays cheap.
+
+- Put fork-only behaviour in a `percona_*.go` file and call it from the upstream
+  file in one line; do not rework upstream code in place.
+- pmm-managed starts the exporter with a fixed set of flags and scrapes groups
+  of collectors with `collect[]` (`cmd/postgres_exporter/percona_exporter.go`).
+  Those flags, and the metric names and labels PMM dashboards and alerts read,
+  are the fork's compatibility surface; `TestPMM*` and
+  `TestExporterStartsWithTheFlagsOfPMM` pin it.
+- The fork's collector defaults are in `config/config_percona.go`. A collector
+  that is on by default must be one pmm-managed can turn off.
+- CI is `.github/workflows/go.yml`; upstream's workflows are not used.
+- Merge upstream with a merge commit, never a squash, so that the next merge
+  starts from the right base.
