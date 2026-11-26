@@ -1,0 +1,6 @@
+# Copy to /etc/default/postgres_exporter (mode 0640, group postgres_exporter) and adjust.
+# Full list of options: postgres_exporter --help, or https://github.com/percona/postgres_exporter
+
+DATA_SOURCE_NAME="postgresql://postgres_exporter:changeme@127.0.0.1:5432/postgres?sslmode=disable"
+
+OPTIONS="--web.listen-address=:9187"
