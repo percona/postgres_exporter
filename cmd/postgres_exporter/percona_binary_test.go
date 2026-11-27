@@ -18,10 +18,12 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -192,4 +194,52 @@ func TestParallelScrapesAreNotLimitedByDefault(t *testing.T) {
 	for _, status := range statuses {
 		assert.Equal(t, http.StatusOK, status)
 	}
+}
+
+func TestProbeSharesTheConnectionLimit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds and runs the exporter")
+	}
+
+	// A database that takes connections, never answers and remembers how many were open at once.
+	database, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = database.Close() })
+
+	var open, peak atomic.Int32
+	go func() {
+		for {
+			conn, err := database.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer conn.Close()
+				n := open.Add(1)
+				defer open.Add(-1)
+				for p := peak.Load(); n > p && !peak.CompareAndSwap(p, n); p = peak.Load() {
+				}
+				_, _ = io.Copy(io.Discard, conn)
+			}()
+		}
+	}()
+
+	addr := startExporter(t, "--max-connections=1")
+	target := url.QueryEscape(database.Addr().String() + "/postgres?sslmode=disable&connect_timeout=1")
+
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Go(func() {
+			resp, err := http.Get("http://" + addr + "/probe?target=" + target)
+			if !assert.NoError(t, err) {
+				return
+			}
+			defer resp.Body.Close()
+			_, _ = io.Copy(io.Discard, resp.Body)
+			assert.Equal(t, http.StatusOK, resp.StatusCode)
+		})
+	}
+	wg.Wait()
+
+	assert.EqualValues(t, 1, peak.Load())
 }

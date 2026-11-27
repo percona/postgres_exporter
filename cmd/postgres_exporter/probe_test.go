@@ -33,6 +33,7 @@ func TestHandleProbeRequiresTarget(t *testing.T) {
 		promslog.NewNopLogger(),
 		authHandler,
 		config.NewConfigWithDefaults(),
+		nil,
 	)
 	request := httptest.NewRequest(http.MethodGet, "/probe", nil)
 	response := httptest.NewRecorder()

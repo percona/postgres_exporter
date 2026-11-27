@@ -22,9 +22,10 @@ import (
 	"github.com/percona/postgres_exporter/config"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"golang.org/x/sync/semaphore"
 )
 
-func handleProbe(logger *slog.Logger, authHandler *config.Handler, baseConfig config.Config) http.HandlerFunc {
+func handleProbe(logger *slog.Logger, authHandler *config.Handler, baseConfig config.Config, connSema *semaphore.Weighted) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		conf := authHandler.GetAuthConfig()
@@ -72,7 +73,7 @@ func handleProbe(logger *slog.Logger, authHandler *config.Handler, baseConfig co
 			return
 		}
 
-		runtime, err := collector.NewRuntime(validatedConfig, tl)
+		runtime, err := collector.NewProbeRuntime(ctx, connSema, validatedConfig, tl)
 		if err != nil {
 			logger.Error("error creating probe runtime", "err", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)

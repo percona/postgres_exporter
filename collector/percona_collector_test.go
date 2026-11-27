@@ -17,12 +17,14 @@ import (
 	"bytes"
 	"context"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/percona/postgres_exporter/config"
 	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/promslog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -189,4 +191,68 @@ func TestCollectionTimeoutLimitsACollectionWithoutScrapeContext(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		require.FailNow(t, "the collection outlived its collection timeout")
 	}
+}
+
+func TestProbeRuntimeCollectsLikeTheMetricsEndpoint(t *testing.T) {
+	cfg := config.NewConfigWithDefaults()
+	cfg.DataSourceNames = []string{"postgres://127.0.0.1:1/postgres?sslmode=disable&connect_timeout=1"}
+	validated, err := cfg.Validate()
+	require.NoError(t, err)
+
+	sem := semaphore.NewWeighted(1)
+	require.True(t, sem.TryAcquire(1))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	var logs bytes.Buffer
+	runtime, err := NewProbeRuntime(ctx, sem, validated, slog.New(slog.NewTextHandler(&logs, nil)))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = runtime.Close() })
+
+	registry := prometheus.NewRegistry()
+	for _, c := range runtime.Collectors() {
+		registry.MustRegister(c)
+	}
+	gathered := make(chan []*dto.MetricFamily, 1)
+	go func() {
+		families, err := registry.Gather()
+		assert.NoError(t, err)
+		gathered <- families
+	}()
+	var families []*dto.MetricFamily
+	select {
+	case families = <-gathered:
+	case <-time.After(10 * time.Second):
+		require.FailNow(t, "the collectors outlived their request")
+	}
+
+	// The only connection slot is taken and the request is gone: neither collector connects.
+	assert.Equal(t, 2, strings.Count(logs.String(), "Failed to acquire semaphore"), logs.String())
+	assert.NotContains(t, logs.String(), "127.0.0.1:1")
+
+	// The exporter's own metrics are labelled as they are on the metrics endpoint.
+	labelled := false
+	for _, family := range families {
+		if family.GetName() != "pg_up" {
+			continue
+		}
+		for _, l := range family.GetMetric()[0].GetLabel() {
+			labelled = labelled || (l.GetName() == "collector" && l.GetValue() == "exporter")
+		}
+	}
+	assert.True(t, labelled, "pg_up has no collector label")
+}
+
+func TestProbeRuntimeQueriesTheTargetOnly(t *testing.T) {
+	cfg := config.NewConfigWithDefaults()
+	cfg.DataSourceNames = []string{testDSN}
+	cfg.AutoDiscoverDatabases = true
+	validated, err := cfg.Validate()
+	require.NoError(t, err)
+
+	runtime, err := NewProbeRuntime(context.Background(), nil, validated, promslog.NewNopLogger())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = runtime.Close() })
+
+	assert.Nil(t, runtime.postgresCollector.databaseDiscovery)
 }

@@ -273,7 +273,7 @@ func (s *exporterServer) newMetricsHandler(b *bootstrap.Bootstrap) (http.Handler
 		return nil, fmt.Errorf("failed to create metrics handler: %w", err)
 	}
 
-	b.Handle("/probe", b.MaxRequestsHandler(handleProbe(logger, authHandler, cfg)))
+	b.Handle("/probe", b.MaxRequestsHandler(handleProbe(logger, authHandler, cfg, metricsHandler.connSema)))
 	b.Handle("/debug/", http.DefaultServeMux)
 
 	b.HandleFunc("/-/reload", handleReload(authHandler, *configFile))
