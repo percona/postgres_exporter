@@ -149,6 +149,7 @@ func main() {
 	// Bootstrap registers it without an env binding. Restore that binding until
 	// v0.22.0, preserving explicit CLI flags' precedence.
 	kingpin.CommandLine.GetFlag("web.telemetry-path").Envar(webTelemetryPathEnvar)
+	applyPerconaFlagDefaults(kingpin.CommandLine)
 	server.envVarFlags = trackDeprecatedEnvVarFlags(kingpin.CommandLine)
 
 	err := runner.Run()

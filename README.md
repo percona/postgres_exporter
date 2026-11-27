@@ -238,7 +238,7 @@ This will build the docker image as `prometheuscommunity/postgres_exporter:${bra
   Path under which to expose metrics. Default is `/metrics`.
 
 * `web.max-requests`
-  Maximum number of parallel scrape requests per endpoint (`/metrics` and `/probe` have independent limits). Excess requests receive HTTP 503. Use `0` to disable. Default is `40`.
+  Maximum number of parallel scrape requests per endpoint (`/metrics` and `/probe` have independent limits). Excess requests receive HTTP 503. Use `0` to disable. Default is `0`.
 
 * `web.disable-exporter-metrics`
   Exclude Go, process, and `postgres_exporter_build_info` metrics. PostgreSQL scrape-status and configuration-reload metrics remain available. Default is `false`.

@@ -74,6 +74,12 @@ func perconaConfig() config.PerconaConfig {
 	}
 }
 
+// applyPerconaFlagDefaults sets the fork's defaults of the flags exporter-toolkit registers.
+func applyPerconaFlagDefaults(app *kingpin.Application) {
+	// Parallel requests are not limited; --max-connections bounds what scrapes do to the database.
+	app.GetFlag("web.max-requests").Default("0")
+}
+
 // applyWebConfigAlias makes --web.config work as --web.config.file.
 func applyWebConfigAlias(flags *web.FlagConfig) {
 	if *webConfigFile != "" {

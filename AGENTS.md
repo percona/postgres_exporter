@@ -84,9 +84,10 @@ hooks, so that merging upstream stays cheap.
 - The fork's collector defaults are in `config/config_percona.go`. A collector
   that is on by default must be one pmm-managed can turn off.
 - The fork's defaults win over upstream's. A switch upstream adds that changes
-  what a scrape returns or how long it may run is off by default here
-  (`--wrap-large-counters`), and the scrape timeout alone limits a scrape of the
-  metrics endpoint (`--collection-timeout` applies to `/probe`).
+  how the exporter answers a scrape is off by default here
+  (`--wrap-large-counters`, `--web.max-requests`), and the scrape timeout alone
+  limits a scrape of the metrics endpoint (`--collection-timeout` applies to
+  `/probe`).
 - CI is `.github/workflows/go.yml`; upstream's workflows are not used.
 - Merge upstream with a merge commit, never a squash, so that the next merge
   starts from the right base.

@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -31,8 +32,14 @@ import (
 // webConfig protects the exporter with the password "secret" for the user "pmm".
 const webConfig = "basic_auth_users:\n  pmm: " + `$2y$04$8y81bZNNUbsA7/Sr/BCaWOBYT3CzY9hlCQFcI8h8GDKrC8kNZP25a` + "\n"
 
-// startExporter builds the exporter, starts it with args on a free port and returns its address.
+// startExporter starts the exporter for a database that refuses connections.
 func startExporter(t *testing.T, args ...string) string {
+	t.Helper()
+	return startExporterFor(t, unreachableDSN, args...)
+}
+
+// startExporterFor builds the exporter, starts it for dsn with args on a free port and returns its address.
+func startExporterFor(t *testing.T, dsn string, args ...string) string {
 	t.Helper()
 
 	bin := filepath.Join(t.TempDir(), "postgres_exporter")
@@ -46,7 +53,7 @@ func startExporter(t *testing.T, args ...string) string {
 
 	var logs bytes.Buffer
 	cmd := exec.CommandContext(t.Context(), bin, append([]string{"--web.listen-address=" + addr}, args...)...)
-	cmd.Env = append(os.Environ(), "DATA_SOURCE_NAME="+unreachableDSN)
+	cmd.Env = append(os.Environ(), "DATA_SOURCE_NAME="+dsn)
 	cmd.Stderr = &logs
 	require.NoError(t, cmd.Start())
 
@@ -147,4 +154,42 @@ func TestExporterStartsWithTheFlagsOfPMM(t *testing.T) {
 
 	status, _ = get(t, "http://"+addr+"/debug/pprof/", "pmm", "secret")
 	assert.Equal(t, http.StatusOK, status)
+}
+
+func TestParallelScrapesAreNotLimitedByDefault(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds and runs the exporter")
+	}
+
+	// A database that takes connections and never answers keeps every scrape busy until its scrape timeout.
+	database, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = database.Close() })
+
+	addr := startExporterFor(t, "postgres://user:pass@"+database.Addr().String()+"/postgres?sslmode=disable&connect_timeout=2")
+
+	// More scrapes at once than upstream's --web.max-requests default of 40 lets through.
+	statuses := make([]int, 60)
+	var wg sync.WaitGroup
+	for i := range statuses {
+		wg.Go(func() {
+			req, err := http.NewRequest(http.MethodGet, "http://"+addr+"/metrics?collect[]=exporter", nil)
+			if !assert.NoError(t, err) {
+				return
+			}
+			req.Header.Set("X-Prometheus-Scrape-Timeout-Seconds", "2")
+			resp, err := http.DefaultClient.Do(req)
+			if !assert.NoError(t, err) {
+				return
+			}
+			defer resp.Body.Close()
+			_, _ = io.Copy(io.Discard, resp.Body)
+			statuses[i] = resp.StatusCode
+		})
+	}
+	wg.Wait()
+
+	for _, status := range statuses {
+		assert.Equal(t, http.StatusOK, status)
+	}
 }
