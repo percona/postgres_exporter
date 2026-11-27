@@ -519,7 +519,7 @@ func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
 
 // Collect implements prometheus.Collector.
 func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
-	ctx, cancel := context.WithTimeout(e.percona.context(), e.collectionTimeout)
+	ctx, cancel := e.percona.collectionContext(e.collectionTimeout)
 	defer cancel()
 
 	e.scrape(ctx, ch)

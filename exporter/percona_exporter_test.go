@@ -222,11 +222,58 @@ func TestScrapeDSNsWaitsForAConnectionSlot(t *testing.T) {
 	assert.Zero(t, connectionErrorsCount)
 }
 
-func TestExporterContext(t *testing.T) {
-	assert.Equal(t, context.Background(), (&perconaExporter{}).context())
+// blockedExporter returns an exporter that waits for the only connection slot, which is taken,
+// for as long as its scrape may run.
+func blockedExporter(t *testing.T, opts ...ExporterOpt) *Exporter {
+	t.Helper()
 
+	sem := semaphore.NewWeighted(1)
+	require.True(t, sem.TryAcquire(1))
+
+	dsns := []string{"postgres://127.0.0.1:1/postgres?sslmode=disable"}
+	return NewExporter(dsns, promslog.NewNopLogger(),
+		append(opts, WithMetricPrefix("pg"), WithConnectionsSemaphore(sem), WithCollectionTimeout(10*time.Millisecond))...)
+}
+
+// collect returns a channel that is closed once the exporter has finished collecting.
+func collect(e *Exporter) <-chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ch := make(chan prometheus.Metric)
+		go func() {
+			defer close(ch)
+			e.Collect(ch)
+		}()
+		for range ch {
+		}
+	}()
+	return done
+}
+
+func TestScrapeContextIsTheOnlyLimitOfAScrape(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	e := NewExporter(nil, promslog.NewNopLogger(), WithContext(ctx))
-	assert.Equal(t, ctx, e.percona.context())
+	done := collect(blockedExporter(t, WithContext(ctx)))
+
+	select {
+	case <-done:
+		require.FailNow(t, "the collection timeout ended a running scrape")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		require.FailNow(t, "the collection outlived its scrape")
+	}
+}
+
+func TestCollectionTimeoutLimitsAScrapeWithoutScrapeContext(t *testing.T) {
+	select {
+	case <-collect(blockedExporter(t)):
+	case <-time.After(5 * time.Second):
+		require.FailNow(t, "the collection outlived its collection timeout")
+	}
 }

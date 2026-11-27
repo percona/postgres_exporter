@@ -310,7 +310,7 @@ func (p PostgresCollector) Collect(ch chan<- prometheus.Metric) {
 	inst := p.instance.copy()
 
 	// Eventually, connect this to the http scraping context
-	ctx, cancel := context.WithTimeout(p.percona.context(), p.CollectionTimeout)
+	ctx, cancel := p.percona.collectionContext(p.CollectionTimeout)
 	defer cancel()
 
 	release, err := p.percona.acquireConnection(ctx)

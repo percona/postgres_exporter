@@ -17,6 +17,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"time"
 
 	"github.com/blang/semver/v4"
 	"github.com/percona/postgres_exporter/exporter"
@@ -46,11 +47,13 @@ func WithConnectionsSemaphore(sem *semaphore.Weighted) Option {
 	}
 }
 
-func (p perconaCollector) context() context.Context {
+// collectionContext returns the context of a collection. The scrape timeout alone limits a scrape
+// of the Percona handler; a collection without a scrape context is limited by timeout.
+func (p perconaCollector) collectionContext(timeout time.Duration) (context.Context, context.CancelFunc) {
 	if p.ctx == nil {
-		return context.Background()
+		return context.WithTimeout(context.Background(), timeout)
 	}
-	return p.ctx
+	return context.WithCancel(p.ctx)
 }
 
 // acquireConnection waits for a free connection slot and returns the function that frees it.

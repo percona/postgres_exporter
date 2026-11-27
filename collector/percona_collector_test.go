@@ -140,3 +140,53 @@ func TestPGStatWalReceiverCollectorSkipsAurora(t *testing.T) {
 	assert.Empty(t, metrics)
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
+
+// blockedCollector returns a collector that waits for the only connection slot, which is taken,
+// for as long as its collection may run.
+func blockedCollector(t *testing.T, options ...Option) PostgresCollector {
+	t.Helper()
+
+	sem := semaphore.NewWeighted(1)
+	require.True(t, sem.TryAcquire(1))
+
+	p, err := NewPostgresCollector(promslog.NewNopLogger(), nil, "postgres://127.0.0.1:1/postgres?sslmode=disable&connect_timeout=1", nil,
+		append(options, WithConnectionsSemaphore(sem), WithCollectionTimeout("10ms"))...)
+	require.NoError(t, err)
+	return *p
+}
+
+func collect(p PostgresCollector) <-chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		p.Collect(make(chan prometheus.Metric))
+	}()
+	return done
+}
+
+func TestScrapeContextIsTheOnlyLimitOfACollection(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := collect(blockedCollector(t, WithContext(ctx)))
+
+	select {
+	case <-done:
+		require.FailNow(t, "the collection timeout ended the collection of a running scrape")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		require.FailNow(t, "the collection outlived its scrape")
+	}
+}
+
+func TestCollectionTimeoutLimitsACollectionWithoutScrapeContext(t *testing.T) {
+	select {
+	case <-collect(blockedCollector(t)):
+	case <-time.After(5 * time.Second):
+		require.FailNow(t, "the collection outlived its collection timeout")
+	}
+}

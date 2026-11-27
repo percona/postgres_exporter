@@ -257,7 +257,6 @@ func (h *perconaHandler) exporter(ctx context.Context, name string, opts ...expo
 	base := []exporter.ExporterOpt{
 		exporter.AutoDiscoverDatabases(cfg.AutoDiscoverDatabases),
 		exporter.ExcludeDatabases(cfg.ExcludeDatabases),
-		exporter.WithCollectionTimeout(cfg.CollectionTimeout),
 		exporter.WithConstantLabels(cfg.ConstantLabels),
 		exporter.WithMetricPrefix(cfg.MetricPrefix),
 		exporter.WrapLargeCounters(cfg.WrapLargeCounters),
@@ -277,7 +276,6 @@ func (h *perconaHandler) postgresCollector(ctx context.Context) (*collector.Post
 		cfg.ExcludeDatabases,
 		cfg.DataSourceNames[0],
 		nil,
-		collector.WithCollectionTimeout(cfg.CollectionTimeout.String()),
 		collector.WithCollectorStates(cfg.Collectors),
 		collector.WithLongRunningTransactionsConfig(cfg.LongRunningTransactions),
 		collector.WithPGStatStatementsConfig(cfg.PGStatStatements),

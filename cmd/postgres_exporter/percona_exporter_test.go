@@ -196,9 +196,36 @@ func TestPerconaFlags(t *testing.T) {
 	} {
 		assert.NotNil(t, kingpin.CommandLine.GetFlag(name), name)
 	}
+}
 
-	// Without a configuration file by default, the exporter does not warn about a missing one at startup.
-	assert.Equal(t, []string{""}, kingpin.CommandLine.GetFlag("config.file").Model().Default)
+func TestPerconaFlagDefaults(t *testing.T) {
+	// The defaults of the fork. An upstream switch that changes what a scrape returns is off:
+	// PMM gets the same from the exporter unless a flag says otherwise.
+	for name, value := range map[string]string{
+		"auto-discover-databases":           "false",
+		"collect.custom_query.hr":           "false",
+		"collect.custom_query.mr":           "false",
+		"collect.custom_query.lr":           "false",
+		"collect.custom_query.hr.directory": "",
+		"collect.custom_query.mr.directory": "",
+		"collect.custom_query.lr.directory": "",
+		"config.file":                       "",
+		"constantLabels":                    "",
+		"disable-default-metrics":           "false",
+		"disable-settings-metrics":          "false",
+		"dumpmaps":                          "",
+		"exclude-databases":                 "",
+		"include-databases":                 "",
+		"max-connections":                   "5",
+		"metric-prefix":                     "pg",
+		"web.config":                        "",
+		"wrap-large-counters":               "false",
+	} {
+		flag := kingpin.CommandLine.GetFlag(name)
+		if assert.NotNil(t, flag, name) {
+			assert.Equal(t, value, strings.Join(flag.Model().Default, ","), name)
+		}
+	}
 }
 
 func TestPerconaConfigFromFlags(t *testing.T) {
@@ -241,4 +268,23 @@ func TestApplyWebConfigAliasKeepsWebConfigFile(t *testing.T) {
 	flags := &web.FlagConfig{WebConfigFile: &file}
 	applyWebConfigAlias(flags)
 	assert.Equal(t, "/upstream.yml", *flags.WebConfigFile)
+}
+
+func TestLargeCountersAreNotWrappedByDefault(t *testing.T) {
+	t.Cleanup(func() {
+		_, err := kingpin.CommandLine.Parse(nil)
+		require.NoError(t, err)
+	})
+
+	_, err := kingpin.CommandLine.Parse(nil)
+	require.NoError(t, err)
+	cfg, err := buildConfig([]string{unreachableDSN})
+	require.NoError(t, err)
+	assert.False(t, cfg.WrapLargeCounters)
+
+	_, err = kingpin.CommandLine.Parse([]string{"--wrap-large-counters"})
+	require.NoError(t, err)
+	cfg, err = buildConfig([]string{unreachableDSN})
+	require.NoError(t, err)
+	assert.True(t, cfg.WrapLargeCounters)
 }

@@ -262,7 +262,7 @@ This will build the docker image as `prometheuscommunity/postgres_exporter:${bra
   queries file.
 
 * `[no-]wrap-large-counters`
-  Wrap 64-bit counter values at 2^53 to avoid floating point rounding. Default is `true`.
+  Wrap 64-bit counter values at 2^53 to avoid floating point rounding. Default is `false`.
 
 * `constantLabels` (DEPRECATED)
   Labels to set in all metrics. A list of `label=value` pairs, separated by commas.

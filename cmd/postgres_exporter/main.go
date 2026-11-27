@@ -48,7 +48,7 @@ var (
 	includeDatabases                    = kingpin.Flag("include-databases", "A list of databases to include when autoDiscoverDatabases is enabled (DEPRECATED)").Default("").Envar("PG_EXPORTER_INCLUDE_DATABASES").String()
 	metricPrefix                        = kingpin.Flag("metric-prefix", "A metric prefix can be used to have non-default (not \"pg\") prefixes for each of the metrics").Default("pg").Envar("PG_EXPORTER_METRIC_PREFIX").String()
 	collectionTimeout                   = kingpin.Flag("collection-timeout", "Timeout for collecting the statistics when the database is slow").Default("1m").Envar("PG_EXPORTER_COLLECTION_TIMEOUT").String()
-	wrapLargeCounters                   = kingpin.Flag("wrap-large-counters", "Wrap 64-bit counters at 2^53 to avoid floating point rounding.").Default("true").Bool()
+	wrapLargeCounters                   = kingpin.Flag("wrap-large-counters", "Wrap 64-bit counters at 2^53 to avoid floating point rounding.").Default("false").Bool()
 	datasourceURI                       = kingpin.Flag("datasource.uri", "Data source URI, in host:port/dbname form.").Default("").String()
 	datasourceURIFile                   = kingpin.Flag("datasource.uri-file", "Path to a file containing the data source URI. Takes precedence over datasource.uri.").Default("").String()
 	datasourceUserFile                  = kingpin.Flag("datasource.user-file", "Path to a file containing the data source user name.").Default("").String()

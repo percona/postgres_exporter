@@ -6,6 +6,8 @@
   * Add enhanced checkpointer metrics
   * Add `pg_stat_io` collector with byte statistics and WAL I/O activity tracking
 * [ENHANCEMENT] Update CI tested PostgreSQL versions to include PostgreSQL 18
+* [CHANGE] Leave counters above `2^53` unwrapped by default; `--wrap-large-counters` enables the wrapping described under 0.21.0
+* [CHANGE] Limit a scrape of the metrics endpoint by the scrape timeout alone; `--collection-timeout` applies to `/probe`
 
 ## 0.21.1 / 2026-11-18
 

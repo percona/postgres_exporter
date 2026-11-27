@@ -25,6 +25,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/blang/semver/v4"
 	"github.com/lib/pq"
@@ -89,11 +90,13 @@ func DisableSettingsMetrics(b bool) ExporterOpt {
 	}
 }
 
-func (p *perconaExporter) context() context.Context {
+// collectionContext returns the context of a scrape. The scrape timeout alone limits a scrape of
+// the Percona handler; a scrape without a scrape context is limited by timeout.
+func (p *perconaExporter) collectionContext(timeout time.Duration) (context.Context, context.CancelFunc) {
 	if p.ctx == nil {
-		return context.Background()
+		return context.WithTimeout(context.Background(), timeout)
 	}
-	return p.ctx
+	return context.WithCancel(p.ctx)
 }
 
 // internalLabels returns the constant labels of the exporter's own metrics.

@@ -22,9 +22,13 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/alecthomas/kingpin/v2"
 	"github.com/percona/postgres_exporter/config"
+	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
+	"github.com/prometheus/common/promslog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -177,4 +181,64 @@ func TestPMMMediumAndLowResolutionScrapes(t *testing.T) {
 		assert.NotContains(t, families, "go_goroutines", collect)
 		assert.Contains(t, families, metric, collect)
 	}
+}
+
+// customQuery writes one custom query file and returns its directory.
+func customQuery(t *testing.T, content string) string {
+	t.Helper()
+
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "queries.yaml"), []byte(content), 0o600))
+	return dir
+}
+
+func TestLargeCounterKeepsItsValueByDefault(t *testing.T) {
+	dsn := os.Getenv("DATA_SOURCE_NAME")
+	require.NotEmpty(t, dsn, "DATA_SOURCE_NAME must point to a PostgreSQL server")
+
+	t.Cleanup(func() {
+		_, err := kingpin.CommandLine.Parse(nil)
+		require.NoError(t, err)
+	})
+	_, err := kingpin.CommandLine.Parse(nil)
+	require.NoError(t, err)
+
+	cfg, err := buildConfig(strings.Split(dsn, ","))
+	require.NoError(t, err)
+	// 2^53 + 2 is the smallest value above 2^53 that a float64 holds exactly.
+	cfg.Percona.CustomQueriesHR = config.CustomQueriesConfig{Enabled: true, Directory: customQuery(t, `
+pg_large_counter:
+  query: "SELECT 9007199254740994::bigint AS value"
+  master: true
+  metrics:
+    - value:
+        usage: "COUNTER"
+        description: "A counter above 2^53."
+`)}
+	validated, err := cfg.Validate()
+	require.NoError(t, err)
+	h, err := newPerconaHandler(promslog.NewNopLogger(), validated, prometheus.NewRegistry(), false)
+	require.NoError(t, err)
+
+	families := scrape(t, h, "custom_query.hr")
+	require.Contains(t, families, "pg_large_counter_value")
+	assert.InDelta(t, 9007199254740994, families["pg_large_counter_value"].GetMetric()[0].GetCounter().GetValue(), 0)
+}
+
+func TestScrapeTimeoutIsTheOnlyLimitOfAPMMScrape(t *testing.T) {
+	h := newPMMHandler(t, config.DefaultMaxConnections, func(cfg *config.Config) {
+		cfg.CollectionTimeout = 100 * time.Millisecond
+		cfg.Percona.CustomQueriesMR = config.CustomQueriesConfig{Enabled: true, Directory: customQuery(t, `
+pg_slow:
+  query: "SELECT 1 AS value FROM pg_sleep(1)"
+  master: true
+  metrics:
+    - value:
+        usage: "GAUGE"
+        description: "A query that takes longer than the collection timeout."
+`)}
+	})
+
+	families := scrape(t, h, "custom_query.mr")
+	assert.Contains(t, families, "pg_slow_value")
 }
