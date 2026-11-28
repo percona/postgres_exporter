@@ -90,6 +90,12 @@ hooks, so that merging upstream stays cheap.
   endpoint, the client on `/probe`. `--collection-timeout` does not apply.
   Both endpoints share `--max-connections`, and `/probe` queries its target
   only (`collector/percona_runtime.go`).
+- Behaviour upstream changed in code the fork already had stays the fork's:
+  `execute` passes on what a failing collector sent, the legacy exporter keeps
+  rows read before an error and logs as it did, `SIGHUP` stops the exporter
+  (`notifyReloadSignals`), and `long_running_transactions` and
+  `stat_wal_receiver` are `percona_*` collectors. The upstream tests that pin
+  upstream's behaviour there are skipped with a pointer to the fork's test.
 - CI is `.github/workflows/go.yml`; upstream's workflows are not used.
 - Merge upstream with a merge commit, never a squash, so that the next merge
   starts from the right base.

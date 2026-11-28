@@ -10,6 +10,7 @@
 * [CHANGE] Limit a scrape of the metrics endpoint by the scrape timeout alone and a `/probe` by its request; `--collection-timeout` does not apply
 * [CHANGE] Do not limit parallel requests by default; `--web.max-requests` enables the limit described under 0.21.0
 * [CHANGE] Keep `/probe` within `--max-connections` and limited to the target database, with the `collector` label on the exporter's own metrics
+* [CHANGE] Keep the behaviour 0.21.0 changed: a failing collector or custom query keeps the metrics it sent, `SIGHUP` stops the exporter, log lines and levels stay as they were and environment variables log no deprecation warning, an unknown `pg_settings` unit panics, `--auto-discover-databases` gives the default metrics to the last configured data source only, the `long_running_transactions` and `stat_wal_receiver` collectors query as before, and the deprecated wraparound metrics keep their help text
 
 ## 0.21.1 / 2026-11-18
 

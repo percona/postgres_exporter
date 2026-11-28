@@ -50,13 +50,13 @@ var (
 	// have always been ID counts, despite the misleading _seconds suffix.
 	databaseWraparoundAgeDatfrozenxidSeconds = prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, databaseWraparoundSubsystem, "age_datfrozenxid_seconds"),
-		"DEPRECATED: Age of pg_database.datfrozenxid in transaction IDs, not seconds. Use pg_database_wraparound_age_datfrozenxid instead.",
+		"Age of the oldest transaction ID that has not been frozen.",
 		[]string{"datname"},
 		prometheus.Labels{},
 	)
 	databaseWraparoundAgeDatminmxidSeconds = prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, databaseWraparoundSubsystem, "age_datminmxid_seconds"),
-		"DEPRECATED: Age of pg_database.datminmxid in MultiXact IDs, not seconds. Use pg_database_wraparound_age_datminmxid instead.",
+		"Age of the oldest multi-transaction ID that has been replaced with a transaction ID.",
 		[]string{"datname"},
 		prometheus.Labels{},
 	)

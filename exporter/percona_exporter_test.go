@@ -14,13 +14,18 @@
 package exporter
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"log/slog"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/blang/semver/v4"
 	"github.com/percona/postgres_exporter/distribution"
 	"github.com/prometheus/client_golang/prometheus"
@@ -276,4 +281,106 @@ func TestCollectionTimeoutLimitsAScrapeWithoutScrapeContext(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		require.FailNow(t, "the collection outlived its collection timeout")
 	}
+}
+
+// logTo returns a logger that writes logfmt lines to buf.
+func logTo(buf *bytes.Buffer) *slog.Logger {
+	return slog.New(slog.NewTextHandler(buf, nil))
+}
+
+// mockedServer returns a server whose database is mocked and whose custom queries are defined by queries.
+func mockedServer(t *testing.T, queries string, logs *bytes.Buffer) (*Server, sqlmock.Sqlmock) {
+	t.Helper()
+
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherEqual))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	server := newTestServer()
+	server.db = db
+	server.logger = logTo(logs)
+	require.NoError(t, addQueries([]byte(queries), semver.MustParse("17.0.0"), server, "pg"))
+	return server, mock
+}
+
+const customQuery = `pg_custom:
+  query: "SELECT name, value FROM custom"
+  metrics:
+    - name:
+        usage: "LABEL"
+        description: "Name."
+    - value:
+        usage: "GAUGE"
+        description: "Value."
+`
+
+func TestQueryNamespaceMappingKeepsTheRowsReadBeforeAnError(t *testing.T) {
+	var logs bytes.Buffer
+	server, mock := mockedServer(t, customQuery, &logs)
+	mock.ExpectQuery("SELECT name, value FROM custom").WillReturnRows(
+		sqlmock.NewRows([]string{"name", "value"}).AddRow("a", 1).AddRow("b", 2).RowError(1, errors.New("connection lost")))
+
+	metrics, nonFatal, err := queryNamespaceMapping(context.Background(), server, "pg_custom", server.metricMap["pg_custom"])
+	require.NoError(t, err)
+	assert.Empty(t, nonFatal)
+	require.Len(t, metrics, 1)
+	assert.Equal(t, "a", metricLabels(t, metrics[0])["name"])
+}
+
+func TestScrapeLogsEveryNamespaceError(t *testing.T) {
+	var logs bytes.Buffer
+	server, mock := mockedServer(t, customQuery, &logs)
+	mock.ExpectQuery("SELECT name, value FROM custom").WillReturnError(errors.New("no such table"))
+
+	err := server.Scrape(context.Background(), make(chan prometheus.Metric, 10))
+	require.EqualError(t, err, "queryNamespaceMappings returned 1 errors")
+
+	lines := strings.Split(strings.TrimSpace(logs.String()), "\n")
+	require.Len(t, lines, 3, logs.String())
+	assert.Contains(t, lines[0], `level=ERROR msg="" err="Error running query on database`)
+	assert.Contains(t, lines[1], `level=ERROR msg="NAMESPACE ERRORS FOUND"`)
+	assert.Contains(t, lines[2], `level=ERROR msg="Error running query on database`)
+	assert.Contains(t, lines[2], `namespace=pg_custom`)
+}
+
+func TestScrapeDSNsLogsTheErrorAlone(t *testing.T) {
+	var logs bytes.Buffer
+	dsns := []string{"postgres://user:secret@127.0.0.1:1/postgres?sslmode=disable&connect_timeout=1"}
+	e := NewExporter(dsns, logTo(&logs), WithMetricPrefix("pg"))
+
+	errorsCount, connectionErrorsCount := e.scrapeDSNs(context.Background(), make(chan prometheus.Metric, 100), dsns)
+	assert.Equal(t, 1, errorsCount)
+	assert.Equal(t, 1, connectionErrorsCount)
+
+	assert.Contains(t, logs.String(), `level=ERROR msg="" err="Error opening connection to database`)
+	assert.NotContains(t, logs.String(), "dsn=")
+	assert.NotContains(t, logs.String(), "secret")
+}
+
+func TestAutoDiscoveryMakesTheLastDataSourceTheMaster(t *testing.T) {
+	dsns := []string{
+		"postgres://127.0.0.1:1/first?sslmode=disable&connect_timeout=1",
+		"postgres://127.0.0.1:1/second?sslmode=disable&connect_timeout=1",
+	}
+	e := NewExporter(dsns, promslog.NewNopLogger(), WithMetricPrefix("pg"), AutoDiscoverDatabases(true))
+
+	assert.ElementsMatch(t, dsns, e.discoverDatabaseDSNs(context.Background()))
+	assert.Equal(t, dsns[1], e.percona.masterDSN)
+}
+
+func TestCustomQueriesErrorsAreLoggedWithThePath(t *testing.T) {
+	dir := t.TempDir()
+	broken := filepath.Join(dir, "broken.yml")
+	require.NoError(t, os.WriteFile(broken, []byte("pg_broken: ["), 0o600))
+
+	var logs bytes.Buffer
+	e := NewExporter(nil, logTo(&logs), WithMetricPrefix("pg"), WithCustomQueriesDirectory(dir))
+	e.loadCustomQueries(semver.MustParse("17.0.0"), newTestServer())
+	assert.Contains(t, logs.String(), `level=ERROR msg="Failed to reload user queries:`+broken+`" err=`)
+
+	logs.Reset()
+	missing := filepath.Join(dir, "missing")
+	e = NewExporter(nil, logTo(&logs), WithMetricPrefix("pg"), WithCustomQueriesDirectory(missing))
+	e.loadCustomQueries(semver.MustParse("17.0.0"), newTestServer())
+	assert.Contains(t, logs.String(), `level=ERROR msg="failed read dir \"`+missing+`\" for custom query" err=`)
 }

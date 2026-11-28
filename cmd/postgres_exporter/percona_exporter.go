@@ -15,8 +15,10 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -30,6 +32,8 @@ import (
 	prometheuscollectors "github.com/prometheus/client_golang/prometheus/collectors"
 	versioncollector "github.com/prometheus/client_golang/prometheus/collectors/version"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/prometheus/common/version"
+	"github.com/prometheus/exporter-toolkit/bootstrap"
 	"github.com/prometheus/exporter-toolkit/web"
 	"golang.org/x/sync/semaphore"
 )
@@ -79,6 +83,17 @@ func applyPerconaFlagDefaults(app *kingpin.Application) {
 	// Parallel requests are not limited; --max-connections bounds what scrapes do to the database.
 	app.GetFlag("web.max-requests").Default("0")
 }
+
+// perconaBootstrapConfig keeps the exporter's name in --version and leaves out the startup log
+// lines exporter-toolkit adds for a named exporter.
+func perconaBootstrapConfig(c bootstrap.Config) bootstrap.Config {
+	c.App.Version(version.Print(c.Name))
+	c.Name = ""
+	return c
+}
+
+// notifyReloadSignals registers no signal, so SIGHUP stops the exporter; /-/reload reloads the configuration file.
+func notifyReloadSignals(chan<- os.Signal) {}
 
 // applyWebConfigAlias makes --web.config work as --web.config.file.
 func applyWebConfigAlias(flags *web.FlagConfig) {
@@ -179,6 +194,8 @@ func (h *perconaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
+
+	h.logger.Info("Excluded databases", "databases", fmt.Sprintf("%v", h.cfg.ExcludeDatabases))
 
 	collect := r.URL.Query()["collect[]"]
 	h.logger.Debug("Collect query", "filters", collect)

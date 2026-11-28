@@ -14,8 +14,12 @@
 package exporter
 
 import (
+	"bytes"
+	"context"
+	"errors"
 	"testing"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
@@ -38,13 +42,11 @@ func TestPgSettingMetric(t *testing.T) {
 		{pgSetting{name: "log_min_duration_statement", setting: "-1", unit: "ms", vartype: "integer"}, "pg_settings_log_min_duration_statement_seconds", -1},
 		{pgSetting{name: "seq_page_cost", setting: "1.5", vartype: "real"}, "pg_settings_seq_page_cost", 1.5},
 		{pgSetting{name: "rds.rds_superuser_reserved_connections", setting: "2", vartype: "integer"}, "pg_settings_rds_rds_superuser_reserved_connections", 2},
-		{pgSetting{name: "some-extension.limit", setting: "3", vartype: "integer"}, "pg_settings_some_extension_limit", 3},
 		// Aurora reports some values together with their unit.
 		{pgSetting{name: "aurora_setting", setting: "5 s", unit: "s", vartype: "integer"}, "pg_settings_aurora_setting_seconds", 5},
 	}
 	for _, tt := range tests {
-		metric, err := tt.setting.metric(labels)
-		require.NoError(t, err, tt.setting.name)
+		metric := tt.setting.metric(labels)
 
 		assert.Contains(t, metric.Desc().String(), `fqName: "`+tt.name+`"`)
 		pb := &dto.Metric{}
@@ -55,7 +57,7 @@ func TestPgSettingMetric(t *testing.T) {
 	}
 }
 
-func TestPgSettingMetricReportsWhatItCannotExpose(t *testing.T) {
+func TestPgSettingMetricPanicsOnWhatItCannotExpose(t *testing.T) {
 	labels := prometheus.Labels{serverLabelName: "db.example:5432"}
 
 	for _, setting := range []pgSetting{
@@ -63,8 +65,34 @@ func TestPgSettingMetricReportsWhatItCannotExpose(t *testing.T) {
 		{name: "not_a_number", setting: "many", vartype: "integer"},
 		{name: "text_setting", setting: "value", vartype: "string"},
 	} {
-		metric, err := setting.metric(labels)
-		assert.Error(t, err, setting.name)
-		assert.Nil(t, metric, setting.name)
+		assert.Panics(t, func() { setting.metric(labels) }, setting.name)
 	}
+}
+
+func TestQuerySettingsIgnoresAnErrorAfterTheRowsItRead(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherEqual))
+	require.NoError(t, err)
+	defer db.Close()
+
+	mock.ExpectQuery("SELECT name, setting, COALESCE(unit, ''), short_desc, vartype FROM pg_settings WHERE vartype IN ('bool', 'integer', 'real') AND name NOT IN ('sync_commit_cancel_wait', 'google_dataplex.max_messages');").
+		WillReturnRows(sqlmock.NewRows([]string{"name", "setting", "unit", "short_desc", "vartype"}).
+			AddRow("max_connections", "100", "", "Connections.", "integer").
+			AddRow("fsync", "on", "", "Fsync.", "bool").
+			RowError(1, errors.New("connection lost")))
+
+	var logs bytes.Buffer
+	server := newTestServer()
+	server.db = db
+	server.logger = logTo(&logs)
+
+	ch := make(chan prometheus.Metric, 10)
+	require.NoError(t, querySettings(context.Background(), ch, server))
+	close(ch)
+	var names []string
+	for m := range ch {
+		names = append(names, m.Desc().String())
+	}
+	require.Len(t, names, 1)
+	assert.Contains(t, names[0], `fqName: "pg_settings_max_connections"`)
+	assert.NoError(t, mock.ExpectationsWereMet())
 }

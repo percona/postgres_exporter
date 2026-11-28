@@ -339,6 +339,7 @@ func (f fakeCollector) Update(ctx context.Context, inst *instance, ch chan<- pro
 }
 
 func TestExecuteDropsMetricsOnError(t *testing.T) {
+	t.Skip("PMM keeps the metrics a collector sent before it failed, see TestFailingCollectorKeepsTheMetricsItSent")
 	tests := []struct {
 		name string
 		err  error

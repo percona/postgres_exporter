@@ -30,21 +30,6 @@ type dataSourceOpts struct {
 	PassFile string
 }
 
-// DATA_SOURCE_NAME/USER/PASS are absent on purpose: they carry secrets, so
-// they get no flag and are not deprecated.
-func warnDeprecatedDataSourceEnvVars() {
-	for envVar, flag := range map[string]string{
-		"DATA_SOURCE_URI":       "--datasource.uri",
-		"DATA_SOURCE_URI_FILE":  "--datasource.uri-file",
-		"DATA_SOURCE_USER_FILE": "--datasource.user-file",
-		"DATA_SOURCE_PASS_FILE": "--datasource.pass-file",
-	} {
-		if os.Getenv(envVar) != "" {
-			logger.Warn("Configuring the data source via environment variable is DEPRECATED", "env", envVar, "flag", flag)
-		}
-	}
-}
-
 func flagOrEnvVar(flagVal, envKey string) string {
 	if flagVal != "" {
 		return flagVal

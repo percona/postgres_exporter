@@ -31,7 +31,7 @@ var settingUnits = []string{
 }
 
 // pgSettingsQuery skips the settings that the settings collector skips for their invalid format.
-const pgSettingsQuery = "SELECT name, setting, COALESCE(unit, ''), COALESCE(short_desc, ''), vartype FROM pg_settings WHERE vartype IN ('bool', 'integer', 'real') AND name NOT IN ('sync_commit_cancel_wait', 'google_dataplex.max_messages');"
+const pgSettingsQuery = "SELECT name, setting, COALESCE(unit, ''), short_desc, vartype FROM pg_settings WHERE vartype IN ('bool', 'integer', 'real') AND name NOT IN ('sync_commit_cancel_wait', 'google_dataplex.max_messages');"
 
 // querySettings exposes the pg_settings view with the labels of the server, which the settings collector does not add.
 func querySettings(ctx context.Context, ch chan<- prometheus.Metric, server *Server) error {
@@ -50,15 +50,10 @@ func querySettings(ctx context.Context, ch chan<- prometheus.Metric, server *Ser
 			return fmt.Errorf("error retrieving rows on '%s': %s %w", server, settingsSubsystem, err)
 		}
 
-		metric, err := s.metric(server.labels)
-		if err != nil {
-			server.logger.Warn("Error normalising unit for setting", "setting", s.name, "value", s.setting, "unit", s.unit, "error", err)
-			continue
-		}
-		ch <- metric
+		ch <- s.metric(server.labels)
 	}
 
-	return rows.Err()
+	return nil
 }
 
 // pgSetting represents a PostgreSQL runtime variable as returned by the pg_settings view.
@@ -66,10 +61,11 @@ type pgSetting struct {
 	name, setting, unit, shortDesc, vartype string
 }
 
-func (s *pgSetting) metric(labels prometheus.Labels) (prometheus.Metric, error) {
+// metric panics on a setting it cannot expose, so that no setting goes missing unnoticed.
+func (s *pgSetting) metric(labels prometheus.Labels) prometheus.Metric {
 	var (
 		err       error
-		name      = strings.ReplaceAll(strings.ReplaceAll(s.name, ".", "_"), "-", "_")
+		name      = strings.ReplaceAll(s.name, ".", "_")
 		unit      = s.unit // nolint: ineffassign
 		shortDesc = fmt.Sprintf("Server Parameter: %s", s.name)
 		val       float64
@@ -83,7 +79,7 @@ func (s *pgSetting) metric(labels prometheus.Labels) (prometheus.Metric, error) 
 	case "integer", "real":
 		val, unit, err = s.normaliseUnit()
 		if err != nil {
-			return nil, err
+			panic(err)
 		}
 
 		if len(unit) > 0 {
@@ -91,11 +87,11 @@ func (s *pgSetting) metric(labels prometheus.Labels) (prometheus.Metric, error) 
 			shortDesc = fmt.Sprintf("%s [Units converted to %s.]", shortDesc, unit)
 		}
 	default:
-		return nil, fmt.Errorf("unsupported vartype '%s'", s.vartype)
+		panic(fmt.Sprintf("Unsupported vartype %q", s.vartype))
 	}
 
 	desc := prometheus.NewDesc(prometheus.BuildFQName(namespace, settingsSubsystem, name), shortDesc, nil, labels)
-	return prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, val), nil
+	return prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, val)
 }
 
 // sanitizeValue removes the unit Aurora appends to some setting values.

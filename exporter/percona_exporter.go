@@ -46,8 +46,8 @@ type perconaExporter struct {
 	disableSettingsMetrics bool
 	connSema               *semaphore.Weighted
 	ctx                    context.Context
-	// masterDSNs are the configured data sources, as opposed to the discovered databases.
-	masterDSNs []string
+	// masterDSN is the last configured data source; with auto-discovery, only it gets the default metrics.
+	masterDSN string
 }
 
 // perconaServer holds what PMM adds to a Server.
@@ -218,7 +218,7 @@ func (e *Exporter) scrapeDSNs(ctx context.Context, ch chan<- prometheus.Metric, 
 				return
 			}
 			errorsCount.Add(1)
-			e.logger.Error("error scraping dsn", "err", config.RedactError(err, dsn), "dsn", loggableDSN(dsn))
+			e.logger.Error("", "err", config.RedactError(err, dsn))
 
 			if _, ok := err.(*ErrorConnectToServer); ok {
 				connectionErrorsCount.Add(1)
@@ -263,10 +263,10 @@ func (e *Exporter) loadCustomQueries(version semver.Version, server *Server) {
 
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		e.logger.Error("Failed to read custom queries directory", "path", dir, "err", err)
+		e.logger.Error(fmt.Sprintf("failed read dir %q for custom query", dir), "err", err)
 		return
 	}
-	e.logger.Debug("Reading custom queries directory", "path", dir)
+	e.logger.Debug(fmt.Sprintf("reading dir %q for custom query", dir))
 
 	for _, entry := range entries {
 		if entry.IsDir() {
@@ -283,7 +283,7 @@ func (e *Exporter) loadCustomQueries(version semver.Version, server *Server) {
 func (e *Exporter) addCustomQueriesFromFile(path string, version semver.Version, server *Server) {
 	userQueriesData, err := os.ReadFile(path)
 	if err != nil {
-		e.logger.Error("Failed to reload user queries", "path", path, "err", err)
+		e.logger.Error("Failed to reload user queries:"+path, "err", err)
 		e.userQueriesError.WithLabelValues(path, "").Set(1)
 		return
 	}
@@ -292,11 +292,23 @@ func (e *Exporter) addCustomQueriesFromFile(path string, version semver.Version,
 
 	err = addQueries(userQueriesData, version, server, e.metricPrefix)
 	if err != nil {
-		e.logger.Error("Failed to reload user queries", "path", path, "err", err)
+		e.logger.Error("Failed to reload user queries:"+path, "err", err)
 		e.userQueriesError.WithLabelValues(path, hashsumStr).Set(1)
 		return
 	}
 
 	// Mark user queries as successfully loaded
 	e.userQueriesError.WithLabelValues(path, hashsumStr).Set(0)
+}
+
+// namespaceMappingsError logs the errors of the namespace queries and returns how many there were.
+func (s *Server) namespaceMappingsError(errMap map[string]error) error {
+	if len(errMap) == 0 {
+		return nil
+	}
+	s.logger.Error("NAMESPACE ERRORS FOUND")
+	for namespace, err := range errMap {
+		s.logger.Error(err.Error(), "namespace", namespace)
+	}
+	return fmt.Errorf("queryNamespaceMappings returned %d errors", len(errMap))
 }

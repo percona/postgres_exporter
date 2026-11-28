@@ -14,6 +14,8 @@
 package main
 
 import (
+	"bytes"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -287,4 +289,21 @@ func TestLargeCountersAreNotWrappedByDefault(t *testing.T) {
 	cfg, err = buildConfig([]string{unreachableDSN})
 	require.NoError(t, err)
 	assert.True(t, cfg.WrapLargeCounters)
+}
+
+func TestExcludedDatabasesAreLoggedOnEveryScrape(t *testing.T) {
+	cfg := config.NewConfigWithDefaults()
+	cfg.DataSourceNames = []string{unreachableDSN}
+	cfg.ExcludeDatabases = []string{"template0", "template1"}
+	cfg.Percona.MaxConnections = config.DefaultMaxConnections
+	validated, err := cfg.Validate()
+	require.NoError(t, err)
+
+	var logs bytes.Buffer
+	h, err := newPerconaHandler(slog.New(slog.NewTextHandler(&logs, nil)), validated, prometheus.NewRegistry(), false)
+	require.NoError(t, err)
+
+	scrape(t, h, "custom_query.mr")
+	scrape(t, h, "standard.go")
+	assert.Equal(t, 2, strings.Count(logs.String(), `level=INFO msg="Excluded databases" databases="[template0 template1]"`), logs.String())
 }

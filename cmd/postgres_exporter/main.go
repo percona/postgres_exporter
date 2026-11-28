@@ -23,7 +23,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/alecthomas/kingpin/v2"
@@ -135,7 +134,7 @@ func newPGStatStatementsFlags() pgStatStatementsFlags {
 
 func main() {
 	server := &exporterServer{}
-	runner := bootstrap.New(bootstrap.Config{
+	runner := bootstrap.New(perconaBootstrapConfig(bootstrap.Config{
 		App:            kingpin.CommandLine,
 		Name:           exporterName,
 		Description:    "Prometheus PostgreSQL server Exporter",
@@ -144,7 +143,7 @@ func main() {
 			Name: "Postgres Exporter",
 		},
 		MetricsHandlerFactory: server.newMetricsHandler,
-	})
+	}))
 	// This flag previously belonged to postgres_exporter and read this env var.
 	// Bootstrap registers it without an env binding. Restore that binding until
 	// v0.22.0, preserving explicit CLI flags' precedence.
@@ -231,10 +230,6 @@ func (s *exporterServer) newMetricsHandler(b *bootstrap.Bootstrap) (http.Handler
 		logger.Warn("Error loading config", "err", err)
 	}
 
-	warnDeprecatedDataSourceEnvVars()
-
-	warnDeprecatedEnvVars(s.envVarFlags)
-
 	dsns, err := getDataSources(dataSourceOpts{
 		URI:      *datasourceURI,
 		URIFile:  *datasourceURIFile,
@@ -280,7 +275,7 @@ func (s *exporterServer) newMetricsHandler(b *bootstrap.Bootstrap) (http.Handler
 
 	reloadSignals := make(chan os.Signal, 1)
 	reloadDone := make(chan struct{})
-	signal.Notify(reloadSignals, syscall.SIGHUP)
+	notifyReloadSignals(reloadSignals)
 	go func() {
 		defer close(reloadDone)
 		handleReloadSignal(reloadSignals, authHandler, *configFile, logger)
@@ -291,6 +286,7 @@ func (s *exporterServer) newMetricsHandler(b *bootstrap.Bootstrap) (http.Handler
 		<-reloadDone
 	}
 
+	logger.Info("Listening on address", "address", *b.FlagConfig.WebListenAddresses)
 	return metricsHandler, nil
 }
 

@@ -151,6 +151,7 @@ func TestNewRuntimeEnablesDatabaseDiscoveryWithAutoDiscoverDatabases(t *testing.
 }
 
 func TestNewRuntimePropagatesLongRunningTransactionsThreshold(t *testing.T) {
+	t.Skip("PMM's long_running_transactions collector has no threshold, see TestPerconaPGLongRunningTransactionsCollector")
 	cfg := config.NewConfigWithDefaults()
 	cfg.DataSourceNames = []string{"postgresql://localhost:5432/postgres?sslmode=disable"}
 	cfg.Collectors[config.CollectorLongRunningTransactions] = true

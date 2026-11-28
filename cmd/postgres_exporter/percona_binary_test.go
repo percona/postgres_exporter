@@ -22,8 +22,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -40,50 +42,94 @@ func startExporter(t *testing.T, args ...string) string {
 	return startExporterFor(t, unreachableDSN, args...)
 }
 
-// startExporterFor builds the exporter, starts it for dsn with args on a free port and returns its address.
+// startExporterFor starts the exporter for dsn with args and returns its address.
 func startExporterFor(t *testing.T, dsn string, args ...string) string {
+	t.Helper()
+	return runExporter(t, []string{"DATA_SOURCE_NAME=" + dsn}, args...).addr
+}
+
+// buildExporter builds the exporter and returns the path of the binary.
+func buildExporter(t *testing.T) string {
 	t.Helper()
 
 	bin := filepath.Join(t.TempDir(), "postgres_exporter")
 	out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput()
 	require.NoError(t, err, string(out))
+	return bin
+}
+
+// exporterProcess is an exporter a test started.
+type exporterProcess struct {
+	addr   string
+	cmd    *exec.Cmd
+	exited chan error
+	logs   *bytes.Buffer
+}
+
+// runExporter builds the exporter and starts it with env and args on a free port.
+func runExporter(t *testing.T, env []string, args ...string) *exporterProcess {
+	t.Helper()
+
+	bin := buildExporter(t)
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	addr := listener.Addr().String()
 	require.NoError(t, listener.Close())
 
-	var logs bytes.Buffer
-	cmd := exec.CommandContext(t.Context(), bin, append([]string{"--web.listen-address=" + addr}, args...)...)
-	cmd.Env = append(os.Environ(), "DATA_SOURCE_NAME="+dsn)
-	cmd.Stderr = &logs
-	require.NoError(t, cmd.Start())
+	p := &exporterProcess{addr: addr, exited: make(chan error, 1), logs: &bytes.Buffer{}}
+	p.cmd = exec.CommandContext(t.Context(), bin, append([]string{"--web.listen-address=" + addr}, args...)...)
+	p.cmd.Env = append(os.Environ(), env...)
+	p.cmd.Stderr = p.logs
+	require.NoError(t, p.cmd.Start())
 
-	exited := make(chan error, 1)
-	go func() { exited <- cmd.Wait() }()
+	go func() { p.exited <- p.cmd.Wait() }()
 	t.Cleanup(func() {
-		_ = cmd.Process.Kill()
-		<-exited
+		_ = p.cmd.Process.Kill()
+		<-p.exited
 	})
 
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
 		select {
-		case err := <-exited:
-			exited <- err
-			require.FailNow(t, "the exporter exited", "%v\n%s", err, logs.String())
+		case err := <-p.exited:
+			p.exited <- err
+			require.FailNow(t, "the exporter exited", "%v\n%s", err, p.logs.String())
 		default:
 		}
 
 		conn, err := net.DialTimeout("tcp", addr, time.Second)
 		if err == nil {
 			require.NoError(t, conn.Close())
-			return addr
+			return p
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
 	require.FailNow(t, "the exporter did not start listening")
-	return ""
+	return nil
+}
+
+// wait waits for the exporter to exit and returns how it exited.
+func (p *exporterProcess) wait(t *testing.T) error {
+	t.Helper()
+
+	select {
+	case err := <-p.exited:
+		p.exited <- err
+		return err
+	case <-time.After(10 * time.Second):
+		require.FailNow(t, "the exporter is still running")
+		return nil
+	}
+}
+
+// stop stops the exporter and returns what it logged.
+func (p *exporterProcess) stop(t *testing.T) string {
+	t.Helper()
+
+	require.NoError(t, p.cmd.Process.Signal(os.Interrupt))
+	_ = p.wait(t)
+	return p.logs.String()
 }
 
 func get(t *testing.T, url, user, password string) (int, string) {
@@ -242,4 +288,47 @@ func TestProbeSharesTheConnectionLimit(t *testing.T) {
 	wg.Wait()
 
 	assert.EqualValues(t, 1, peak.Load())
+}
+
+func TestStartupLogsOfTheExporter(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds and runs the exporter")
+	}
+
+	p := runExporter(t, []string{
+		"DATA_SOURCE_NAME=" + unreachableDSN,
+		"DATA_SOURCE_PASS_FILE=/nonexistent",
+		"PG_EXPORTER_MAX_CONNECTIONS=3",
+	})
+	logs := p.stop(t)
+
+	assert.Contains(t, logs, `msg="Listening on address" address=[`+p.addr+`]`)
+	assert.NotContains(t, logs, "Starting postgres_exporter")
+	assert.NotContains(t, logs, "Build context")
+	assert.NotContains(t, logs, "DEPRECATED")
+}
+
+func TestVersionOfTheExporter(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds and runs the exporter")
+	}
+
+	out, err := exec.Command(buildExporter(t), "--version").CombinedOutput()
+	require.NoError(t, err, string(out))
+	assert.True(t, strings.HasPrefix(string(out), "postgres_exporter, version "), string(out))
+}
+
+func TestSIGHUPStopsTheExporter(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds and runs the exporter")
+	}
+
+	p := runExporter(t, []string{"DATA_SOURCE_NAME=" + unreachableDSN})
+	require.NoError(t, p.cmd.Process.Signal(syscall.SIGHUP))
+
+	var exitErr *exec.ExitError
+	require.ErrorAs(t, p.wait(t), &exitErr)
+	status, ok := exitErr.Sys().(syscall.WaitStatus)
+	require.True(t, ok)
+	assert.Equal(t, syscall.SIGHUP, status.Signal())
 }

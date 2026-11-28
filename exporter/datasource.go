@@ -54,7 +54,7 @@ func (e *Exporter) discoverDatabaseDSNs(ctx context.Context) []string {
 		dsns[dsn] = struct{}{}
 
 		// If autoDiscoverDatabases is true, set first dsn as master database (Default: false)
-		e.percona.masterDSNs = append(e.percona.masterDSNs, dsn)
+		e.percona.masterDSN = dsn
 
 		databaseNames, err := e.databaseNames(ctx, dsn)
 		if err != nil {
@@ -100,7 +100,7 @@ func (e *Exporter) scrapeDSN(ctx context.Context, ch chan<- prometheus.Metric, d
 	defer server.Close() //nolint:errcheck
 
 	// Check if autoDiscoverDatabases is false, set dsn as master database (Default: false)
-	if !e.autoDiscoverDatabases || slices.Contains(e.percona.masterDSNs, dsn) {
+	if !e.autoDiscoverDatabases || e.percona.masterDSN == dsn {
 		server.master = true
 	}
 

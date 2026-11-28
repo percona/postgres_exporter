@@ -202,6 +202,7 @@ func TestQueryNamespaceMappingHonorsContextCancellation(t *testing.T) {
 }
 
 func TestQueryNamespaceMappingDiscardsMetricsOnRowError(t *testing.T) {
+	t.Skip("PMM keeps the rows a query returned before the error, see TestQueryNamespaceMappingKeepsTheRowsReadBeforeAnError")
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("creating mock database: %v", err)

@@ -182,9 +182,6 @@ func queryNamespaceMapping(ctx context.Context, server *Server, namespace string
 			metrics = append(metrics, metric)
 		}
 	}
-	if err := rows.Err(); err != nil {
-		return []prometheus.Metric{}, []error{}, errors.New(fmt.Sprintln("Error retrieving rows:", namespace, err))
-	}
 	return metrics, nonfatalErrors, nil
 }
 
@@ -240,12 +237,12 @@ func queryNamespaceMappings(ctx context.Context, ch chan<- prometheus.Metric, se
 		// Serious error - a namespace disappeared
 		if err != nil {
 			namespaceErrors[namespace] = err
-			server.logger.Info("error finding namespace", "err", err)
+			server.logger.Error("", "err", err)
 		}
 		// Non-serious errors - likely version or parsing problems.
 		if len(nonFatalErrors) > 0 {
 			for _, err := range nonFatalErrors {
-				server.logger.Info("error querying namespace", "err", err)
+				server.logger.Info("", "err", err)
 			}
 		}
 

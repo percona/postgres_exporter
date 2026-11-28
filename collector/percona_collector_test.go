@@ -16,6 +16,7 @@ package collector
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"testing"
@@ -255,4 +256,39 @@ func TestProbeRuntimeQueriesTheTargetOnly(t *testing.T) {
 	t.Cleanup(func() { _ = runtime.Close() })
 
 	assert.Nil(t, runtime.postgresCollector.databaseDiscovery)
+}
+
+// partialCollector sends one metric and then fails.
+type partialCollector struct{}
+
+func (partialCollector) Update(_ context.Context, _ *instance, ch chan<- prometheus.Metric) error {
+	ch <- prometheus.MustNewConstMetric(prometheus.NewDesc("pg_partial", "Sent before the error.", nil, nil), prometheus.GaugeValue, 1)
+	return errors.New("failed after the first row")
+}
+
+func TestFailingCollectorKeepsTheMetricsItSent(t *testing.T) {
+	metrics := collected(t, func(ch chan<- prometheus.Metric) error {
+		execute(context.Background(), "partial", partialCollector{}, &instance{}, ch, promslog.NewNopLogger(), false)
+		return nil
+	})
+
+	assert.Equal(t, []MetricResult{{labels: labelMap{}, value: 1, metricType: dto.MetricType_GAUGE}}, metrics["pg_partial"])
+	assert.Equal(t, []MetricResult{{labels: labelMap{"collector": "partial"}, value: 0, metricType: dto.MetricType_GAUGE}}, metrics["pg_scrape_collector_success"])
+}
+
+func TestPerconaCollectorsReplaceUpstreams(t *testing.T) {
+	for name, want := range map[string]Collector{
+		"long_running_transactions": &PerconaPGLongRunningTransactionsCollector{},
+		"stat_wal_receiver":         &PerconaPGStatWalReceiverCollector{},
+	} {
+		c, err := factories[name].create(collectorConfig{logger: promslog.NewNopLogger()})
+		require.NoError(t, err, name)
+		assert.IsType(t, want, c, name)
+		assert.Equal(t, serverScope, factories[name].scope, name)
+	}
+}
+
+func TestDatabaseWraparoundHelpOfTheSecondsMetrics(t *testing.T) {
+	assert.Contains(t, databaseWraparoundAgeDatfrozenxidSeconds.String(), `help: "Age of the oldest transaction ID that has not been frozen."`)
+	assert.Contains(t, databaseWraparoundAgeDatminmxidSeconds.String(), `help: "Age of the oldest multi-transaction ID that has been replaced with a transaction ID."`)
 }

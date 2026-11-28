@@ -82,13 +82,13 @@ func TestPGDatabaseWraparoundCollector(t *testing.T) {
 			"Age of pg_database.datfrozenxid in transaction IDs.", 87126426,
 		},
 		"pg_database_wraparound_age_datfrozenxid_seconds": {
-			"DEPRECATED: Age of pg_database.datfrozenxid in transaction IDs, not seconds. Use pg_database_wraparound_age_datfrozenxid instead.", 87126426,
+			"Age of the oldest transaction ID that has not been frozen.", 87126426,
 		},
 		"pg_database_wraparound_age_datminmxid": {
 			"Age of pg_database.datminmxid in MultiXact IDs.", 17,
 		},
 		"pg_database_wraparound_age_datminmxid_seconds": {
-			"DEPRECATED: Age of pg_database.datminmxid in MultiXact IDs, not seconds. Use pg_database_wraparound_age_datminmxid instead.", 17,
+			"Age of the oldest multi-transaction ID that has been replaced with a transaction ID.", 17,
 		},
 	}
 	if len(families) != len(expected) {

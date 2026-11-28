@@ -16,7 +16,6 @@ package exporter
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -136,18 +135,7 @@ func (s *Server) Scrape(ctx context.Context, ch chan<- prometheus.Metric) error 
 	s.mappingMtx.RLock()
 	defer s.mappingMtx.RUnlock()
 
-	var err error
-
-	errMap := queryNamespaceMappings(ctx, ch, s)
-	if len(errMap) == 0 {
-		return nil
-	}
-	err = fmt.Errorf("queryNamespaceMappings errors encountered")
-	for namespace, errStr := range errMap {
-		err = fmt.Errorf("%s, namespace: %s error: %s", err, namespace, errStr)
-	}
-
-	return err
+	return s.namespaceMappingsError(queryNamespaceMappings(ctx, ch, s))
 }
 
 // Servers contains a collection of servers to Postgres.
