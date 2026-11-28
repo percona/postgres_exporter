@@ -45,6 +45,11 @@ jobs:
       env:
         POSTGRESQL_IMAGE: ${{ matrix.postgresql-image }}
 
+    - name: Run integration tests
+      run: make test GOOPTS='-tags integration -p 1'
+      env:
+        DATA_SOURCE_NAME: postgresql://root:root@127.0.0.1:5432/postgres?sslmode=disable
+
     - name: Run debug commands on failure
       if: ${{ failure() }}
       run: |

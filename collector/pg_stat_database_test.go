@@ -14,29 +14,20 @@ package collector
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/blang/semver/v4"
-	"github.com/go-kit/log"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
+	"github.com/prometheus/common/promslog"
 	"github.com/smartystreets/goconvey/convey"
 )
 
-var pg18 = semver.MustParse("18.0.0")
-
-func TestPGStatDatabaseCollector(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("Error opening a stub db connection: %s", err)
-	}
-	defer db.Close()
-
-	inst := &instance{db: db, version: pg18}
-
-	columns := []string{
+var (
+	pgStatCollectorTestColumns = []string{
 		"datid",
 		"datname",
 		"numbackends",
@@ -56,16 +47,25 @@ func TestPGStatDatabaseCollector(t *testing.T) {
 		"blk_read_time",
 		"blk_write_time",
 		"stats_reset",
-		"parallel_workers_to_launch",
-		"parallel_workers_launched",
+		"active_time",
 	}
+)
+
+func TestPGStatDatabaseCollector(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("Error opening a stub db connection: %s", err)
+	}
+	defer db.Close()
+
+	inst := &instance{db: db, version: semver.MustParse("14.0.0")}
 
 	srT, err := time.Parse("2006-01-02 15:04:05.00000-07", "2023-05-25 17:10:42.81132-07")
 	if err != nil {
 		t.Fatalf("Error parsing time: %s", err)
 	}
 
-	rows := sqlmock.NewRows(columns).
+	rows := sqlmock.NewRows(pgStatCollectorTestColumns).
 		AddRow(
 			"pid",
 			"postgres",
@@ -86,17 +86,16 @@ func TestPGStatDatabaseCollector(t *testing.T) {
 			16,
 			823,
 			srT,
-			3,
-			2,
+			33,
 		)
 
-	mock.ExpectQuery(sanitizeQuery(statDatabaseQueryPostPG18)).WillReturnRows(rows)
+	mock.ExpectQuery(sanitizeQuery(statDatabaseQuery(pgStatCollectorTestColumns))).WillReturnRows(rows)
 
 	ch := make(chan prometheus.Metric)
 	go func() {
 		defer close(ch)
 		c := PGStatDatabaseCollector{
-			log: log.With(log.NewNopLogger(), "collector", "pg_stat_database"),
+			log: promslog.NewNopLogger().With("collector", "pg_stat_database"),
 		}
 
 		if err := c.Update(context.Background(), inst, ch); err != nil {
@@ -122,8 +121,7 @@ func TestPGStatDatabaseCollector(t *testing.T) {
 		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 16},
 		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 823},
 		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 1685059842},
-		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 3},
-		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 2},
+		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 0.033},
 	}
 
 	convey.Convey("Metrics comparison", t, func() {
@@ -148,33 +146,9 @@ func TestPGStatDatabaseCollectorNullValues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Error parsing time: %s", err)
 	}
-	inst := &instance{db: db, version: pg18}
+	inst := &instance{db: db, version: semver.MustParse("14.0.0")}
 
-	columns := []string{
-		"datid",
-		"datname",
-		"numbackends",
-		"xact_commit",
-		"xact_rollback",
-		"blks_read",
-		"blks_hit",
-		"tup_returned",
-		"tup_fetched",
-		"tup_inserted",
-		"tup_updated",
-		"tup_deleted",
-		"conflicts",
-		"temp_files",
-		"temp_bytes",
-		"deadlocks",
-		"blk_read_time",
-		"blk_write_time",
-		"stats_reset",
-		"parallel_workers_to_launch",
-		"parallel_workers_launched",
-	}
-
-	rows := sqlmock.NewRows(columns).
+	rows := sqlmock.NewRows(pgStatCollectorTestColumns).
 		AddRow(
 			nil,
 			"postgres",
@@ -195,8 +169,7 @@ func TestPGStatDatabaseCollectorNullValues(t *testing.T) {
 			16,
 			823,
 			srT,
-			nil,
-			nil,
+			32,
 		).
 		AddRow(
 			"pid",
@@ -218,16 +191,15 @@ func TestPGStatDatabaseCollectorNullValues(t *testing.T) {
 			16,
 			823,
 			srT,
-			3,
-			2,
+			32,
 		)
-	mock.ExpectQuery(sanitizeQuery(statDatabaseQueryPostPG18)).WillReturnRows(rows)
+	mock.ExpectQuery(sanitizeQuery(statDatabaseQuery(pgStatCollectorTestColumns))).WillReturnRows(rows)
 
 	ch := make(chan prometheus.Metric)
 	go func() {
 		defer close(ch)
 		c := PGStatDatabaseCollector{
-			log: log.With(log.NewNopLogger(), "collector", "pg_stat_database"),
+			log: promslog.NewNopLogger().With("collector", "pg_stat_database"),
 		}
 
 		if err := c.Update(context.Background(), inst, ch); err != nil {
@@ -253,8 +225,7 @@ func TestPGStatDatabaseCollectorNullValues(t *testing.T) {
 		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 16},
 		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 823},
 		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 1685059842},
-		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 3},
-		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 2},
+		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 0.032},
 	}
 
 	convey.Convey("Metrics comparison", t, func() {
@@ -274,38 +245,14 @@ func TestPGStatDatabaseCollectorRowLeakTest(t *testing.T) {
 	}
 	defer db.Close()
 
-	inst := &instance{db: db, version: pg18}
-
-	columns := []string{
-		"datid",
-		"datname",
-		"numbackends",
-		"xact_commit",
-		"xact_rollback",
-		"blks_read",
-		"blks_hit",
-		"tup_returned",
-		"tup_fetched",
-		"tup_inserted",
-		"tup_updated",
-		"tup_deleted",
-		"conflicts",
-		"temp_files",
-		"temp_bytes",
-		"deadlocks",
-		"blk_read_time",
-		"blk_write_time",
-		"stats_reset",
-		"parallel_workers_to_launch",
-		"parallel_workers_launched",
-	}
+	inst := &instance{db: db, version: semver.MustParse("14.0.0")}
 
 	srT, err := time.Parse("2006-01-02 15:04:05.00000-07", "2023-05-25 17:10:42.81132-07")
 	if err != nil {
 		t.Fatalf("Error parsing time: %s", err)
 	}
 
-	rows := sqlmock.NewRows(columns).
+	rows := sqlmock.NewRows(pgStatCollectorTestColumns).
 		AddRow(
 			"pid",
 			"postgres",
@@ -326,11 +273,9 @@ func TestPGStatDatabaseCollectorRowLeakTest(t *testing.T) {
 			16,
 			823,
 			srT,
-			5,
-			4,
+			14,
 		).
 		AddRow(
-			nil,
 			nil,
 			nil,
 			nil,
@@ -372,16 +317,15 @@ func TestPGStatDatabaseCollectorRowLeakTest(t *testing.T) {
 			17,
 			824,
 			srT,
-			3,
-			2,
+			15,
 		)
-	mock.ExpectQuery(sanitizeQuery(statDatabaseQueryPostPG18)).WillReturnRows(rows)
+	mock.ExpectQuery(sanitizeQuery(statDatabaseQuery(pgStatCollectorTestColumns))).WillReturnRows(rows)
 
 	ch := make(chan prometheus.Metric)
 	go func() {
 		defer close(ch)
 		c := PGStatDatabaseCollector{
-			log: log.With(log.NewNopLogger(), "collector", "pg_stat_database"),
+			log: promslog.NewNopLogger().With("collector", "pg_stat_database"),
 		}
 
 		if err := c.Update(context.Background(), inst, ch); err != nil {
@@ -407,8 +351,8 @@ func TestPGStatDatabaseCollectorRowLeakTest(t *testing.T) {
 		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 16},
 		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 823},
 		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 1685059842},
-		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 5},
-		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 4},
+		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 0.014},
+
 		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_GAUGE, value: 355},
 		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 4946},
 		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 289097745},
@@ -426,8 +370,7 @@ func TestPGStatDatabaseCollectorRowLeakTest(t *testing.T) {
 		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 17},
 		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 824},
 		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 1685059842},
-		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 3},
-		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 2},
+		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 0.015},
 	}
 
 	convey.Convey("Metrics comparison", t, func() {
@@ -448,33 +391,9 @@ func TestPGStatDatabaseCollectorTestNilStatReset(t *testing.T) {
 	}
 	defer db.Close()
 
-	inst := &instance{db: db, version: pg18}
+	inst := &instance{db: db, version: semver.MustParse("14.0.0")}
 
-	columns := []string{
-		"datid",
-		"datname",
-		"numbackends",
-		"xact_commit",
-		"xact_rollback",
-		"blks_read",
-		"blks_hit",
-		"tup_returned",
-		"tup_fetched",
-		"tup_inserted",
-		"tup_updated",
-		"tup_deleted",
-		"conflicts",
-		"temp_files",
-		"temp_bytes",
-		"deadlocks",
-		"blk_read_time",
-		"blk_write_time",
-		"stats_reset",
-		"parallel_workers_to_launch",
-		"parallel_workers_launched",
-	}
-
-	rows := sqlmock.NewRows(columns).
+	rows := sqlmock.NewRows(pgStatCollectorTestColumns).
 		AddRow(
 			"pid",
 			"postgres",
@@ -495,17 +414,16 @@ func TestPGStatDatabaseCollectorTestNilStatReset(t *testing.T) {
 			16,
 			823,
 			nil,
-			3,
-			2,
+			7,
 		)
 
-	mock.ExpectQuery(sanitizeQuery(statDatabaseQueryPostPG18)).WillReturnRows(rows)
+	mock.ExpectQuery(sanitizeQuery(statDatabaseQuery(pgStatCollectorTestColumns))).WillReturnRows(rows)
 
 	ch := make(chan prometheus.Metric)
 	go func() {
 		defer close(ch)
 		c := PGStatDatabaseCollector{
-			log: log.With(log.NewNopLogger(), "collector", "pg_stat_database"),
+			log: promslog.NewNopLogger().With("collector", "pg_stat_database"),
 		}
 
 		if err := c.Update(context.Background(), inst, ch); err != nil {
@@ -531,8 +449,7 @@ func TestPGStatDatabaseCollectorTestNilStatReset(t *testing.T) {
 		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 16},
 		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 823},
 		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 0},
-		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 3},
-		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 2},
+		{labels: labelMap{"datid": "pid", "datname": "postgres"}, metricType: dto.MetricType_COUNTER, value: 0.007},
 	}
 
 	convey.Convey("Metrics comparison", t, func() {
@@ -544,4 +461,61 @@ func TestPGStatDatabaseCollectorTestNilStatReset(t *testing.T) {
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("there were unfulfilled exceptions: %s", err)
 	}
+}
+
+func TestPGStatDatabaseCollectorRowsError(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("Error opening a stub db connection: %s", err)
+	}
+	defer db.Close()
+
+	inst := &instance{db: db, version: semver.MustParse("14.0.0")}
+
+	expectedRowErr := errors.New("test row error")
+	rows := sqlmock.NewRows(pgStatCollectorTestColumns).
+		AddRow(
+			"pid",
+			"postgres",
+			354,
+			4945,
+			289097744,
+			1242257,
+			int64(3275602074),
+			89320867,
+			450139,
+			2034563757,
+			0,
+			int64(2725688749),
+			23,
+			52,
+			74,
+			925,
+			16,
+			823,
+			nil,
+			7,
+		).RowError(0, expectedRowErr)
+
+	mock.ExpectQuery(sanitizeQuery(statDatabaseQuery(pgStatCollectorTestColumns))).WillReturnRows(rows)
+
+	convey.Convey("With a buffered channel and valid collector", t, func() {
+		ch := make(chan prometheus.Metric, 1)
+		defer close(ch)
+
+		c := PGStatDatabaseCollector{
+			log: promslog.NewNopLogger().With("collector", "pg_stat_database"),
+		}
+
+		convey.Convey("When doing an Update", func() {
+			err := c.Update(context.Background(), inst, ch)
+
+			convey.Convey("It should return expected row error, with the channel remaining empty", func() {
+				convey.So(err, convey.ShouldBeError, expectedRowErr)
+				convey.So(ch, convey.ShouldBeEmpty)
+
+				convey.So(mock.ExpectationsWereMet(), convey.ShouldBeNil)
+			})
+		})
+	})
 }

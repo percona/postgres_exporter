@@ -16,14 +16,11 @@ package collector
 import (
 	"context"
 
-	"github.com/percona/postgres_exporter/distribution"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-const replicationSubsystem = "replication"
-
 func init() {
-	registerCollector(replicationSubsystem, defaultEnabled, NewPGReplicationCollector)
+	registerCollector(replicationSubsystem, serverScope, NewPGReplicationCollector)
 }
 
 type PGReplicationCollector struct {
@@ -52,6 +49,15 @@ var (
 		"Indicates if the server is a replica",
 		[]string{}, nil,
 	)
+	pgReplicationLastReplay = prometheus.NewDesc(
+		prometheus.BuildFQName(
+			namespace,
+			replicationSubsystem,
+			"last_replay_seconds",
+		),
+		"Age of last replay in seconds",
+		[]string{}, nil,
+	)
 
 	pgReplicationQuery = `SELECT
 	CASE
@@ -62,13 +68,29 @@ var (
 	CASE
 		WHEN pg_is_in_recovery() THEN 1
 		ELSE 0
-	END as is_replica`
+	END as is_replica,
+	GREATEST (0, EXTRACT(EPOCH FROM (now() - pg_last_xact_replay_timestamp()))) as last_replay`
+
+	// pgReplicationAuroraQuery is used on Amazon Aurora PostgreSQL, which
+	// rejects pg_last_xact_replay_timestamp() and, on readers,
+	// pg_last_wal_receive_lsn() as not supported.
+	pgReplicationAuroraQuery = `SELECT pg_is_in_recovery()::int AS is_replica`
 )
 
 func (c *PGReplicationCollector) Update(ctx context.Context, instance *instance, ch chan<- prometheus.Metric) error {
 	db := instance.getDB()
-	// Skip Aurora instances (not supported pg_last_wal_receive_lsn)
-	if distribution.IsAurora(instance.dsn, db) {
+
+	// Aurora reports only is_replica: the replica lag there comes from the
+	// aurora_replica_status collector.
+	if instance.isAurora {
+		var isReplica int64
+		if err := db.QueryRowContext(ctx, pgReplicationAuroraQuery).Scan(&isReplica); err != nil {
+			return err
+		}
+		ch <- prometheus.MustNewConstMetric(
+			pgReplicationIsReplica,
+			prometheus.GaugeValue, float64(isReplica),
+		)
 		return nil
 	}
 
@@ -78,7 +100,8 @@ func (c *PGReplicationCollector) Update(ctx context.Context, instance *instance,
 
 	var lag float64
 	var isReplica int64
-	err := row.Scan(&lag, &isReplica)
+	var replayAge float64
+	err := row.Scan(&lag, &isReplica, &replayAge)
 	if err != nil {
 		return err
 	}
@@ -89,6 +112,10 @@ func (c *PGReplicationCollector) Update(ctx context.Context, instance *instance,
 	ch <- prometheus.MustNewConstMetric(
 		pgReplicationIsReplica,
 		prometheus.GaugeValue, float64(isReplica),
+	)
+	ch <- prometheus.MustNewConstMetric(
+		pgReplicationLastReplay,
+		prometheus.GaugeValue, replayAge,
 	)
 	return nil
 }

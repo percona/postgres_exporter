@@ -13,10 +13,18 @@
 package collector
 
 import (
+	"context"
+	"errors"
 	"strings"
+	"sync"
+	"testing"
+	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/percona/postgres_exporter/config"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
+	"github.com/prometheus/common/promslog"
 )
 
 type labelMap map[string]string
@@ -59,4 +67,311 @@ func sanitizeQuery(q string) string {
 	q = strings.ReplaceAll(q, "^", "\\^")
 	q = strings.ReplaceAll(q, "$", "\\$")
 	return q
+}
+
+func TestPostgresCollectorWrapLargeCounters(t *testing.T) {
+	tests := []struct {
+		name    string
+		options []Option
+		want    bool
+	}{
+		{name: "enabled by default", want: true},
+		{name: "disabled by option", options: []Option{WithWrapLargeCounters(false)}, want: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			collector, err := NewPostgresCollector(
+				promslog.NewNopLogger(),
+				nil,
+				"postgresql://local",
+				nil,
+				test.options...,
+			)
+			if err != nil {
+				t.Fatalf("creating collector: %v", err)
+			}
+
+			if got := collector.instance.wrapLargeCounters; got != test.want {
+				t.Fatalf("instance wrapLargeCounters = %t, want %t", got, test.want)
+			}
+			if got := collector.instance.copy().wrapLargeCounters; got != test.want {
+				t.Fatalf("copied instance wrapLargeCounters = %t, want %t", got, test.want)
+			}
+		})
+	}
+}
+
+// We ensure that when the database respond after a long time
+// The collection process still occurs in a predictable manner
+// Will avoid accumulation of queries on a completely frozen DB
+func TestWithConnectionTimeout(t *testing.T) {
+
+	timeoutForQuery := time.Duration(100 * time.Millisecond)
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("Error opening a stub db connection: %s", err)
+	}
+	defer db.Close()
+
+	inst := &instance{db: db}
+
+	columns := []string{"pg_roles.rolname", "pg_roles.rolconnlimit"}
+	rows := sqlmock.NewRows(columns).AddRow("role1", 2)
+	mock.ExpectQuery(pgRolesConnectionLimitsQuery).
+		WillDelayFor(30 * time.Second).
+		WillReturnRows(rows)
+
+	log_config := promslog.Config{}
+
+	logger := promslog.New(&log_config)
+
+	c, err := NewPostgresCollector(logger, []string{}, "postgresql://local", []string{}, WithCollectionTimeout(timeoutForQuery.String()))
+	if err != nil {
+		t.Fatalf("error creating NewPostgresCollector: %s", err)
+	}
+	collector_config := collectorConfig{
+		logger:           logger,
+		excludeDatabases: []string{},
+	}
+
+	collector, err := NewPGRolesCollector(collector_config)
+	if err != nil {
+		t.Fatalf("error creating collector: %s", err)
+	}
+	c.Collectors["test"] = collector
+	c.instance = inst
+
+	ch := make(chan prometheus.Metric)
+	defer close(ch)
+
+	go func() {
+		for {
+			<-ch
+			time.Sleep(1 * time.Millisecond)
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeoutForQuery)
+	defer cancel()
+
+	startTime := time.Now()
+	c.collectFromConnection(ctx, inst, ch, nil)
+	elapsed := time.Since(startTime)
+
+	if elapsed <= timeoutForQuery {
+		t.Errorf("elapsed time was %v, should be bigger than timeout=%v", elapsed, timeoutForQuery)
+	}
+
+	// Ensure we took more than timeout, but not too much
+	if elapsed >= timeoutForQuery+500*time.Millisecond {
+		t.Errorf("elapsed time was %v, should not be much bigger than timeout=%v", elapsed, timeoutForQuery)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("there were unfulfilled exceptions: %s", err)
+	}
+}
+
+func TestNewPostgresCollectorCreatesIndependentCollectorInstances(t *testing.T) {
+	logger := promslog.NewNopLogger()
+	dsn := "postgresql://local"
+
+	first, err := NewPostgresCollector(logger, []string{"first"}, dsn, []string{})
+	if err != nil {
+		t.Fatalf("NewPostgresCollector() first error = %v", err)
+	}
+	second, err := NewPostgresCollector(logger, []string{"second"}, dsn, []string{})
+	if err != nil {
+		t.Fatalf("NewPostgresCollector() second error = %v", err)
+	}
+
+	firstDatabase, ok := first.Collectors[databaseSubsystem].(*PGDatabaseCollector)
+	if !ok {
+		t.Fatalf("first database collector type = %T, want *PGDatabaseCollector", first.Collectors[databaseSubsystem])
+	}
+	secondDatabase, ok := second.Collectors[databaseSubsystem].(*PGDatabaseCollector)
+	if !ok {
+		t.Fatalf("second database collector type = %T, want *PGDatabaseCollector", second.Collectors[databaseSubsystem])
+	}
+	if firstDatabase == secondDatabase {
+		t.Fatal("database collector instances are shared, want independent instances")
+	}
+	if got, want := firstDatabase.excludedDatabases[0], "first"; got != want {
+		t.Fatalf("first excluded database = %q, want %q", got, want)
+	}
+	if got, want := secondDatabase.excludedDatabases[0], "second"; got != want {
+		t.Fatalf("second excluded database = %q, want %q", got, want)
+	}
+}
+
+func TestNewPostgresCollectorUsesCollectorStateOverrides(t *testing.T) {
+	logger := promslog.NewNopLogger()
+	dsn := "postgresql://local"
+
+	c, err := NewPostgresCollector(
+		logger,
+		nil,
+		dsn,
+		nil,
+		WithCollectorStates(map[string]bool{databaseSubsystem: false}),
+	)
+	if err != nil {
+		t.Fatalf("NewPostgresCollector() error = %v", err)
+	}
+	if _, ok := c.Collectors[databaseSubsystem]; ok {
+		t.Fatal("database collector is enabled, want disabled")
+	}
+}
+
+func TestCollectFromConnectionFiltersToMatchingScope(t *testing.T) {
+	logger := promslog.NewNopLogger()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("Error opening a stub db connection: %s", err)
+	}
+	defer db.Close()
+	inst := &instance{db: db}
+
+	c, err := NewPostgresCollector(logger, nil, "postgresql://local", nil)
+	if err != nil {
+		t.Fatalf("NewPostgresCollector() error = %v", err)
+	}
+
+	var mu sync.Mutex
+	ran := make(map[string]bool)
+	for name := range c.Collectors {
+		c.Collectors[name] = collectorFunc(func(ctx context.Context, instance *instance, ch chan<- prometheus.Metric) error {
+			mu.Lock()
+			ran[name] = true
+			mu.Unlock()
+			return nil
+		})
+	}
+
+	ch := make(chan prometheus.Metric, 1024)
+	scope := databaseScope
+	c.collectFromConnection(context.Background(), inst, ch, &scope)
+	close(ch)
+	for range ch {
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("there were unfulfilled expectations: %s", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	for name, didRun := range ran {
+		want := factories[name].scope == databaseScope
+		if didRun != want {
+			t.Errorf("collector %q ran = %v, want %v", name, didRun, want)
+		}
+	}
+}
+
+// collectorFunc adapts a function to the Collector interface.
+type collectorFunc func(ctx context.Context, instance *instance, ch chan<- prometheus.Metric) error
+
+func (f collectorFunc) Update(ctx context.Context, instance *instance, ch chan<- prometheus.Metric) error {
+	return f(ctx, instance, ch)
+}
+
+func TestRegisterCollectorRejectsUnknownConfig(t *testing.T) {
+	const name = "not_in_default_config"
+
+	defer func() {
+		if recover() == nil {
+			t.Fatalf("registerCollector(%q) did not panic", name)
+		}
+	}()
+
+	registerCollector(name, serverScope, func(collectorConfig) (Collector, error) {
+		return nil, nil
+	})
+}
+
+func TestNewPGStatStatementsCollectorUsesConfig(t *testing.T) {
+	logger := promslog.NewNopLogger()
+
+	collector, err := NewPGStatStatementsCollector(collectorConfig{
+		logger: logger,
+		pgStatStatementsConfig: config.PGStatStatementsConfig{
+			IncludeQuery:     true,
+			QueryLength:      42,
+			Limit:            7,
+			ExcludeDatabases: []string{"postgres"},
+			ExcludeUsers:     []string{"monitor"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewPGStatStatementsCollector() error = %v", err)
+	}
+	got, ok := collector.(*PGStatStatementsCollector)
+	if !ok {
+		t.Fatalf("collector type = %T, want *PGStatStatementsCollector", collector)
+	}
+	if !got.includeQueryStatement {
+		t.Fatal("includeQueryStatement = false, want true")
+	}
+	if got.statementLength != 42 {
+		t.Fatalf("statementLength = %d, want 42", got.statementLength)
+	}
+	if got.statementLimit != 7 {
+		t.Fatalf("statementLimit = %d, want 7", got.statementLimit)
+	}
+	if got.excludedDatabases[0] != "postgres" {
+		t.Fatalf("excludedDatabases[0] = %q, want postgres", got.excludedDatabases[0])
+	}
+	if got.excludedUsers[0] != "monitor" {
+		t.Fatalf("excludedUsers[0] = %q, want monitor", got.excludedUsers[0])
+	}
+}
+
+type fakeCollector struct {
+	err error
+}
+
+func (f fakeCollector) Update(ctx context.Context, inst *instance, ch chan<- prometheus.Metric) error {
+	ch <- prometheus.MustNewConstMetric(
+		prometheus.NewDesc("fake_metric", "help", nil, nil), prometheus.GaugeValue, 1)
+	return f.err
+}
+
+func TestExecuteDropsMetricsOnError(t *testing.T) {
+	t.Skip("PMM keeps the metrics a collector sent before it failed, see TestFailingCollectorKeepsTheMetricsItSent")
+	tests := []struct {
+		name string
+		err  error
+		want []string
+	}{
+		{"success", nil, []string{"fake_metric", "pg_scrape_collector_duration_seconds", "pg_scrape_collector_success"}},
+		{"error", errors.New("boom"), []string{"pg_scrape_collector_duration_seconds", "pg_scrape_collector_success"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ch := make(chan prometheus.Metric, 10)
+			execute(context.Background(), "fake", fakeCollector{err: tt.err}, nil, ch, promslog.NewNopLogger(), false)
+			close(ch)
+			var got []string
+			success := -1.0
+			for m := range ch {
+				name := m.Desc().String()
+				for _, w := range []string{"pg_scrape_collector_duration_seconds", "pg_scrape_collector_success", "fake_metric"} {
+					if strings.Contains(name, `"`+w+`"`) {
+						got = append(got, w)
+						if w == "pg_scrape_collector_success" {
+							success = readMetric(m).value
+						}
+					}
+				}
+			}
+			if strings.Join(got, ",") != strings.Join(tt.want, ",") {
+				t.Fatalf("got metrics %v, want %v", got, tt.want)
+			}
+			if (tt.err == nil) != (success == 1) {
+				t.Fatalf("unexpected success value %v", success)
+			}
+		})
+	}
 }

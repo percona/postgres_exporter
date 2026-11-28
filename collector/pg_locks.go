@@ -16,19 +16,17 @@ package collector
 import (
 	"context"
 	"database/sql"
+	"log/slog"
 
-	"github.com/go-kit/log"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-const locksSubsystem = "locks"
-
 func init() {
-	registerCollector(locksSubsystem, defaultEnabled, NewPGLocksCollector)
+	registerCollector(locksSubsystem, serverScope, NewPGLocksCollector)
 }
 
 type PGLocksCollector struct {
-	log log.Logger
+	log *slog.Logger
 }
 
 func NewPGLocksCollector(config collectorConfig) (Collector, error) {
@@ -122,8 +120,6 @@ func (c PGLocksCollector) Update(ctx context.Context, instance *instance, ch cha
 			datname.String, mode.String,
 		)
 	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	return nil
+
+	return rows.Err()
 }

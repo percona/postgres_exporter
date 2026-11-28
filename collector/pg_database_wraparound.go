@@ -16,20 +16,17 @@ package collector
 import (
 	"context"
 	"database/sql"
+	"log/slog"
 
-	"github.com/go-kit/log"
-	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-const databaseWraparoundSubsystem = "database_wraparound"
-
 func init() {
-	registerCollector(databaseWraparoundSubsystem, defaultEnabled, NewPGDatabaseWraparoundCollector)
+	registerCollector(databaseWraparoundSubsystem, serverScope, NewPGDatabaseWraparoundCollector)
 }
 
 type PGDatabaseWraparoundCollector struct {
-	log log.Logger
+	log *slog.Logger
 }
 
 func NewPGDatabaseWraparoundCollector(config collectorConfig) (Collector, error) {
@@ -38,12 +35,26 @@ func NewPGDatabaseWraparoundCollector(config collectorConfig) (Collector, error)
 
 var (
 	databaseWraparoundAgeDatfrozenxid = prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, databaseWraparoundSubsystem, "age_datfrozenxid"),
+		"Age of pg_database.datfrozenxid in transaction IDs.",
+		[]string{"datname"},
+		prometheus.Labels{},
+	)
+	databaseWraparoundAgeDatminmxid = prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, databaseWraparoundSubsystem, "age_datminmxid"),
+		"Age of pg_database.datminmxid in MultiXact IDs.",
+		[]string{"datname"},
+		prometheus.Labels{},
+	)
+	// Retain the old metric names for existing dashboards and alerts. Their values
+	// have always been ID counts, despite the misleading _seconds suffix.
+	databaseWraparoundAgeDatfrozenxidSeconds = prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, databaseWraparoundSubsystem, "age_datfrozenxid_seconds"),
 		"Age of the oldest transaction ID that has not been frozen.",
 		[]string{"datname"},
 		prometheus.Labels{},
 	)
-	databaseWraparoundAgeDatminmxid = prometheus.NewDesc(
+	databaseWraparoundAgeDatminmxidSeconds = prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, databaseWraparoundSubsystem, "age_datminmxid_seconds"),
 		"Age of the oldest multi-transaction ID that has been replaced with a transaction ID.",
 		[]string{"datname"},
@@ -81,15 +92,15 @@ func (c *PGDatabaseWraparoundCollector) Update(ctx context.Context, instance *in
 		}
 
 		if !datname.Valid {
-			level.Debug(c.log).Log("msg", "Skipping database with NULL name")
+			c.log.Debug("Skipping database with NULL name")
 			continue
 		}
 		if !ageDatfrozenxid.Valid {
-			level.Debug(c.log).Log("msg", "Skipping stat emission with NULL age_datfrozenxid")
+			c.log.Debug("Skipping stat emission with NULL age_datfrozenxid")
 			continue
 		}
 		if !ageDatminmxid.Valid {
-			level.Debug(c.log).Log("msg", "Skipping stat emission with NULL age_datminmxid")
+			c.log.Debug("Skipping stat emission with NULL age_datminmxid")
 			continue
 		}
 
@@ -100,6 +111,11 @@ func (c *PGDatabaseWraparoundCollector) Update(ctx context.Context, instance *in
 			prometheus.GaugeValue,
 			ageDatfrozenxidMetric, datname.String,
 		)
+		ch <- prometheus.MustNewConstMetric(
+			databaseWraparoundAgeDatfrozenxidSeconds,
+			prometheus.GaugeValue,
+			ageDatfrozenxidMetric, datname.String,
+		)
 
 		ageDatminmxidMetric := ageDatminmxid.Float64
 		ch <- prometheus.MustNewConstMetric(
@@ -107,9 +123,12 @@ func (c *PGDatabaseWraparoundCollector) Update(ctx context.Context, instance *in
 			prometheus.GaugeValue,
 			ageDatminmxidMetric, datname.String,
 		)
+		ch <- prometheus.MustNewConstMetric(
+			databaseWraparoundAgeDatminmxidSeconds,
+			prometheus.GaugeValue,
+			ageDatminmxidMetric, datname.String,
+		)
 	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	return nil
+
+	return rows.Err()
 }

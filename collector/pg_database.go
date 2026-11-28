@@ -16,19 +16,18 @@ package collector
 import (
 	"context"
 	"database/sql"
+	"log/slog"
+	"slices"
 
-	"github.com/go-kit/log"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-const databaseSubsystem = "database"
-
 func init() {
-	registerCollector(databaseSubsystem, defaultEnabled, NewPGDatabaseCollector)
+	registerCollector(databaseSubsystem, serverScope, NewPGDatabaseCollector)
 }
 
 type PGDatabaseCollector struct {
-	log               log.Logger
+	log               *slog.Logger
 	excludedDatabases []string
 }
 
@@ -53,12 +52,21 @@ var (
 		"Disk space used by the database",
 		[]string{"datname"}, nil,
 	)
+	pgDatabaseConnectionLimitsDesc = prometheus.NewDesc(
+		prometheus.BuildFQName(
+			namespace,
+			databaseSubsystem,
+			"connection_limit",
+		),
+		"Connection limit set for the database",
+		[]string{"datname"}, nil,
+	)
 
-	pgDatabaseQuery     = "SELECT pg_database.datname FROM pg_database;"
+	pgDatabaseQuery     = "SELECT pg_database.datname, pg_database.datconnlimit FROM pg_database;"
 	pgDatabaseSizeQuery = "SELECT pg_database_size($1)"
 )
 
-// Update implements Collector and exposes database size.
+// Update implements Collector and exposes database size and connection limits.
 // It is called by the Prometheus registry when collecting metrics.
 // The list of databases is retrieved from pg_database and filtered
 // by the excludeDatabase config parameter. The tradeoff here is that
@@ -81,21 +89,32 @@ func (c PGDatabaseCollector) Update(ctx context.Context, instance *instance, ch 
 
 	for rows.Next() {
 		var datname sql.NullString
-		if err := rows.Scan(&datname); err != nil {
+		var connLimit sql.NullInt64
+		if err := rows.Scan(&datname, &connLimit); err != nil {
 			return err
 		}
 
 		if !datname.Valid {
 			continue
 		}
+		database := datname.String
 		// Ignore excluded databases
 		// Filtering is done here instead of in the query to avoid
 		// a complicated NOT IN query with a variable number of parameters
-		if sliceContains(c.excludedDatabases, datname.String) {
+		if slices.Contains(c.excludedDatabases, database) {
 			continue
 		}
 
-		databases = append(databases, datname.String)
+		databases = append(databases, database)
+
+		connLimitMetric := 0.0
+		if connLimit.Valid {
+			connLimitMetric = float64(connLimit.Int64)
+		}
+		ch <- prometheus.MustNewConstMetric(
+			pgDatabaseConnectionLimitsDesc,
+			prometheus.GaugeValue, connLimitMetric, database,
+		)
 	}
 
 	// Query the size of the databases
@@ -114,15 +133,8 @@ func (c PGDatabaseCollector) Update(ctx context.Context, instance *instance, ch 
 			pgDatabaseSizeDesc,
 			prometheus.GaugeValue, sizeMetric, datname,
 		)
-	}
-	return rows.Err()
-}
 
-func sliceContains(slice []string, s string) bool {
-	for _, item := range slice {
-		if item == s {
-			return true
-		}
 	}
-	return false
+
+	return rows.Err()
 }

@@ -1,6 +1,6 @@
 go:
-    # This must match .circle/config.yml.
-    version: 1.21
+    # This must match .github/workflows/ci.yml.
+    version: 1.27
 repository:
     path: github.com/percona/postgres_exporter
 build:

@@ -15,19 +15,18 @@ package collector
 
 import (
 	"context"
+	"database/sql"
+	"log/slog"
 
-	"github.com/go-kit/log"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-const statActivityAutovacuumSubsystem = "stat_activity_autovacuum"
-
 func init() {
-	registerCollector(statActivityAutovacuumSubsystem, defaultDisabled, NewPGStatActivityAutovacuumCollector)
+	registerCollector(statActivityAutovacuumSubsystem, serverScope, NewPGStatActivityAutovacuumCollector)
 }
 
 type PGStatActivityAutovacuumCollector struct {
-	log log.Logger
+	log *slog.Logger
 }
 
 func NewPGStatActivityAutovacuumCollector(config collectorConfig) (Collector, error) {
@@ -38,12 +37,14 @@ var (
 	statActivityAutovacuumAgeInSeconds = prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, statActivityAutovacuumSubsystem, "timestamp_seconds"),
 		"Start timestamp of the vacuum process in seconds",
-		[]string{"relname"},
+		[]string{"datname", "schemaname", "relname"},
 		prometheus.Labels{},
 	)
 
 	statActivityAutovacuumQuery = `
     SELECT
+		COALESCE(datname, '') AS datname,
+		SPLIT_PART(REGEXP_REPLACE(query, '^autovacuum: (VACUUM( ANALYZE)?|ANALYZE|BRIN summarize) ', ''), '.', 1) AS schemaname,
 		SPLIT_PART(query, '.', 2) AS relname,
 		EXTRACT(EPOCH FROM xact_start) AS timestamp_seconds
     FROM
@@ -53,7 +54,7 @@ var (
 	`
 )
 
-func (PGStatActivityAutovacuumCollector) Update(ctx context.Context, instance *instance, ch chan<- prometheus.Metric) error {
+func (c PGStatActivityAutovacuumCollector) Update(ctx context.Context, instance *instance, ch chan<- prometheus.Metric) error {
 	db := instance.getDB()
 	rows, err := db.QueryContext(ctx,
 		statActivityAutovacuumQuery)
@@ -64,21 +65,24 @@ func (PGStatActivityAutovacuumCollector) Update(ctx context.Context, instance *i
 	defer rows.Close()
 
 	for rows.Next() {
-		var relname string
-		var ageInSeconds float64
+		var datname, schemaname, relname string
+		var ageInSeconds sql.NullFloat64
 
-		if err := rows.Scan(&relname, &ageInSeconds); err != nil {
+		if err := rows.Scan(&datname, &schemaname, &relname, &ageInSeconds); err != nil {
 			return err
+		}
+
+		if !ageInSeconds.Valid {
+			c.log.Debug("Skipping collecting metric because it has no xact_start")
+			continue
 		}
 
 		ch <- prometheus.MustNewConstMetric(
 			statActivityAutovacuumAgeInSeconds,
 			prometheus.GaugeValue,
-			ageInSeconds, relname,
+			ageInSeconds.Float64, datname, schemaname, relname,
 		)
 	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	return nil
+
+	return rows.Err()
 }

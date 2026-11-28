@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/blang/semver/v4"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/smartystreets/goconvey/convey"
@@ -30,7 +31,7 @@ func TestPGStatBGWriterCollector(t *testing.T) {
 	}
 	defer db.Close()
 
-	inst := &instance{db: db, name: "test"}
+	inst := &instance{db: db}
 
 	columns := []string{
 		"checkpoints_timed",
@@ -52,7 +53,7 @@ func TestPGStatBGWriterCollector(t *testing.T) {
 
 	rows := sqlmock.NewRows(columns).
 		AddRow(354, 4945, 289097744, 1242257, int64(3275602074), 89320867, 450139, 2034563757, 0, int64(2725688749), srT)
-	mock.ExpectQuery(sanitizeQuery(statBGWriterQueryPrePG17)).WillReturnRows(rows)
+	mock.ExpectQuery(sanitizeQuery(statBGWriterQueryBefore17)).WillReturnRows(rows)
 
 	ch := make(chan prometheus.Metric)
 	go func() {
@@ -64,19 +65,18 @@ func TestPGStatBGWriterCollector(t *testing.T) {
 		}
 	}()
 
-	labels := labelMap{"collector": "exporter", "server": "test"}
 	expected := []MetricResult{
-		{labels: labels, metricType: dto.MetricType_COUNTER, value: 354},
-		{labels: labels, metricType: dto.MetricType_COUNTER, value: 4945},
-		{labels: labels, metricType: dto.MetricType_COUNTER, value: 289097744},
-		{labels: labels, metricType: dto.MetricType_COUNTER, value: 1242257},
-		{labels: labels, metricType: dto.MetricType_COUNTER, value: 3275602074},
-		{labels: labels, metricType: dto.MetricType_COUNTER, value: 89320867},
-		{labels: labels, metricType: dto.MetricType_COUNTER, value: 450139},
-		{labels: labels, metricType: dto.MetricType_COUNTER, value: 2034563757},
-		{labels: labels, metricType: dto.MetricType_COUNTER, value: 0},
-		{labels: labels, metricType: dto.MetricType_COUNTER, value: 2725688749},
-		{labels: labels, metricType: dto.MetricType_COUNTER, value: 1685059842},
+		{labels: labelMap{}, metricType: dto.MetricType_COUNTER, value: 354},
+		{labels: labelMap{}, metricType: dto.MetricType_COUNTER, value: 4945},
+		{labels: labelMap{}, metricType: dto.MetricType_COUNTER, value: 289097744},
+		{labels: labelMap{}, metricType: dto.MetricType_COUNTER, value: 1242257},
+		{labels: labelMap{}, metricType: dto.MetricType_COUNTER, value: 3275602074},
+		{labels: labelMap{}, metricType: dto.MetricType_COUNTER, value: 89320867},
+		{labels: labelMap{}, metricType: dto.MetricType_COUNTER, value: 450139},
+		{labels: labelMap{}, metricType: dto.MetricType_COUNTER, value: 2034563757},
+		{labels: labelMap{}, metricType: dto.MetricType_COUNTER, value: 0},
+		{labels: labelMap{}, metricType: dto.MetricType_COUNTER, value: 2725688749},
+		{labels: labelMap{}, metricType: dto.MetricType_COUNTER, value: 1685059842},
 	}
 
 	convey.Convey("Metrics comparison", t, func() {
@@ -97,7 +97,7 @@ func TestPGStatBGWriterCollectorNullValues(t *testing.T) {
 	}
 	defer db.Close()
 
-	inst := &instance{db: db, name: "test"}
+	inst := &instance{db: db}
 
 	columns := []string{
 		"checkpoints_timed",
@@ -114,7 +114,7 @@ func TestPGStatBGWriterCollectorNullValues(t *testing.T) {
 
 	rows := sqlmock.NewRows(columns).
 		AddRow(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
-	mock.ExpectQuery(sanitizeQuery(statBGWriterQueryPrePG17)).WillReturnRows(rows)
+	mock.ExpectQuery(sanitizeQuery(statBGWriterQueryBefore17)).WillReturnRows(rows)
 
 	ch := make(chan prometheus.Metric)
 	go func() {
@@ -126,19 +126,18 @@ func TestPGStatBGWriterCollectorNullValues(t *testing.T) {
 		}
 	}()
 
-	labels := labelMap{"collector": "exporter", "server": "test"}
 	expected := []MetricResult{
-		{labels: labels, metricType: dto.MetricType_COUNTER, value: 0},
-		{labels: labels, metricType: dto.MetricType_COUNTER, value: 0},
-		{labels: labels, metricType: dto.MetricType_COUNTER, value: 0},
-		{labels: labels, metricType: dto.MetricType_COUNTER, value: 0},
-		{labels: labels, metricType: dto.MetricType_COUNTER, value: 0},
-		{labels: labels, metricType: dto.MetricType_COUNTER, value: 0},
-		{labels: labels, metricType: dto.MetricType_COUNTER, value: 0},
-		{labels: labels, metricType: dto.MetricType_COUNTER, value: 0},
-		{labels: labels, metricType: dto.MetricType_COUNTER, value: 0},
-		{labels: labels, metricType: dto.MetricType_COUNTER, value: 0},
-		{labels: labels, metricType: dto.MetricType_COUNTER, value: 0},
+		{labels: labelMap{}, metricType: dto.MetricType_COUNTER, value: 0},
+		{labels: labelMap{}, metricType: dto.MetricType_COUNTER, value: 0},
+		{labels: labelMap{}, metricType: dto.MetricType_COUNTER, value: 0},
+		{labels: labelMap{}, metricType: dto.MetricType_COUNTER, value: 0},
+		{labels: labelMap{}, metricType: dto.MetricType_COUNTER, value: 0},
+		{labels: labelMap{}, metricType: dto.MetricType_COUNTER, value: 0},
+		{labels: labelMap{}, metricType: dto.MetricType_COUNTER, value: 0},
+		{labels: labelMap{}, metricType: dto.MetricType_COUNTER, value: 0},
+		{labels: labelMap{}, metricType: dto.MetricType_COUNTER, value: 0},
+		{labels: labelMap{}, metricType: dto.MetricType_COUNTER, value: 0},
+		{labels: labelMap{}, metricType: dto.MetricType_COUNTER, value: 0},
 	}
 
 	convey.Convey("Metrics comparison", t, func() {
@@ -149,5 +148,57 @@ func TestPGStatBGWriterCollectorNullValues(t *testing.T) {
 	})
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("there were unfulfilled exceptions: %s", err)
+	}
+}
+
+func TestPGStatBGWriterCollectorWrapsLargeCounters(t *testing.T) {
+	const largeCounter = int64(1<<53) + 1
+
+	tests := []struct {
+		name  string
+		wrap  bool
+		value float64
+	}{
+		{name: "enabled", wrap: true, value: 1},
+		{name: "disabled", wrap: false, value: float64(largeCounter)},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatalf("opening stub database: %s", err)
+			}
+			t.Cleanup(func() { _ = db.Close() })
+
+			inst := &instance{
+				db:                db,
+				version:           semver.MustParse("17.0.0"),
+				wrapLargeCounters: test.wrap,
+			}
+			columns := []string{"buffers_clean", "maxwritten_clean", "buffers_alloc", "stats_reset"}
+			rows := sqlmock.NewRows(columns).AddRow(largeCounter, 0, 0, nil)
+			mock.ExpectQuery(sanitizeQuery(statBGWriterQueryAfter17)).WillReturnRows(rows)
+
+			ch := make(chan prometheus.Metric)
+			go func() {
+				defer close(ch)
+				if err := (PGStatBGWriterCollector{}).Update(context.Background(), inst, ch); err != nil {
+					t.Errorf("updating collector: %s", err)
+				}
+			}()
+
+			metric := readMetric(<-ch)
+			if metric.value != test.value {
+				t.Fatalf("buffers_clean value = %v, want %v", metric.value, test.value)
+			}
+			for range 3 {
+				<-ch
+			}
+
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Errorf("unmet database expectations: %v", err)
+			}
+		})
 	}
 }

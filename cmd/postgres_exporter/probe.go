@@ -15,10 +15,9 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 	"net/http"
 
-	"github.com/go-kit/log"
-	"github.com/go-kit/log/level"
 	"github.com/percona/postgres_exporter/collector"
 	"github.com/percona/postgres_exporter/config"
 	"github.com/prometheus/client_golang/prometheus"
@@ -26,10 +25,10 @@ import (
 	"golang.org/x/sync/semaphore"
 )
 
-func handleProbe(logger log.Logger, excludeDatabases []string, connSema *semaphore.Weighted) http.HandlerFunc {
+func handleProbe(logger *slog.Logger, authHandler *config.Handler, baseConfig config.Config, connSema *semaphore.Weighted) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
-		conf := c.GetConfig()
+		conf := authHandler.GetAuthConfig()
 		params := r.URL.Query()
 		target := params.Get("target")
 		if target == "" {
@@ -39,7 +38,7 @@ func handleProbe(logger log.Logger, excludeDatabases []string, connSema *semapho
 		var authModule config.AuthModule
 		authModuleName := params.Get("auth_module")
 		if authModuleName == "" {
-			level.Info(logger).Log("msg", "no auth_module specified, using default")
+			logger.Info("no auth_module specified, using default")
 		} else {
 			var ok bool
 			authModule, ok = conf.AuthModules[authModuleName]
@@ -55,55 +54,43 @@ func handleProbe(logger log.Logger, excludeDatabases []string, connSema *semapho
 
 		dsn, err := authModule.ConfigureTarget(target)
 		if err != nil {
-			level.Error(logger).Log("msg", "failed to configure target", "err", err)
+			logger.Error("failed to configure target", "err", err)
 			http.Error(w, fmt.Sprintf("could not configure dsn for target: %v", err), http.StatusBadRequest)
 			return
 		}
 
 		// TODO(@sysadmind): Timeout
 
-		tl := log.With(logger, "target", target)
+		tl := logger.With("target", target)
 
-		registry := prometheus.NewRegistry()
-
-		opts := []ExporterOpt{
-			DisableDefaultMetrics(*disableDefaultMetrics),
-			DisableSettingsMetrics(*disableSettingsMetrics),
-			AutoDiscoverDatabases(*autoDiscoverDatabases),
-			// WithUserQueriesPath(*queriesPath),
-			WithConstantLabels(*constantLabelsList),
-			ExcludeDatabases(excludeDatabases),
-			IncludeDatabases(*includeDatabases),
-			WithContext(ctx),
-			WithConnectionsSemaphore(connSema),
-		}
-
-		dsns := []string{dsn.GetConnectionString()}
-		exporter := NewExporter(dsns, opts...)
-
-		// defer func() {
-		// 	exporter.servers.Close()
-		// }()
-		registry.MustRegister(exporter)
-
-		// Run the probe
-		pc, err := collector.NewProbeCollector(ctx, tl, excludeDatabases, registry, dsn, connSema)
+		// Copy process-level config before setting the per-request target DSN.
+		probeConfig := baseConfig
+		probeConfig.DataSourceNames = []string{dsn.GetConnectionString()}
+		validatedConfig, err := probeConfig.Validate()
 		if err != nil {
-			level.Error(logger).Log("msg", "Error creating probe collector", "err", err)
+			logger.Error("invalid probe config", "err", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
-		// Cleanup underlying connections to prevent connection leaks
-		defer pc.Close()
+		runtime, err := collector.NewProbeRuntime(ctx, connSema, validatedConfig, tl)
+		if err != nil {
+			logger.Error("error creating probe runtime", "err", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer func() {
+			if err := runtime.Close(); err != nil {
+				logger.Error("error closing probe runtime", "err", err)
+			}
+		}()
 
-		// TODO(@sysadmind): Remove the registry.MustRegister() call below and instead handle the collection here. That will allow
-		// for the passing of context, handling of timeouts, and more control over the collection.
-		// The current NewProbeCollector() implementation relies on the MustNewConstMetric() call to create the metrics which is not
-		// ideal to use without the registry.MustRegister() call.
+		registry := prometheus.NewRegistry()
+		for _, collector := range runtime.Collectors() {
+			registry.MustRegister(collector)
+		}
+
 		_ = ctx
-
-		registry.MustRegister(pc)
 
 		// TODO check success, etc
 		h := promhttp.HandlerFor(registry, promhttp.HandlerOpts{})

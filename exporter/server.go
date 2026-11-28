@@ -1,0 +1,206 @@
+// Copyright 2021 The Prometheus Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package exporter
+
+import (
+	"context"
+	"database/sql"
+	"log/slog"
+	"sync"
+	"time"
+
+	"github.com/blang/semver/v4"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/common/promslog"
+)
+
+// Server describes a connection to Postgres.
+// Also it contains metrics map and query overrides.
+type Server struct {
+	db                *sql.DB
+	labels            prometheus.Labels
+	master            bool
+	runonserver       string
+	wrapLargeCounters bool
+
+	// Last version used to calculate metric map. If mismatch on scrape,
+	// then maps are recalculated.
+	lastMapVersion semver.Version
+	// Currently active metric map
+	metricMap map[string]MetricMapNamespace
+	// Currently active query overrides
+	queryOverrides map[string]string
+	mappingMtx     sync.RWMutex
+	// Currently cached metrics
+	metricCache map[string]cachedMetrics
+	cacheMtx    sync.Mutex
+	logger      *slog.Logger
+
+	percona perconaServer
+}
+
+// ServerOpt configures a server.
+type ServerOpt func(*Server)
+
+// ServerWithLabels configures a set of labels.
+func ServerWithLabels(labels prometheus.Labels) ServerOpt {
+	return func(s *Server) {
+		for k, v := range labels {
+			s.labels[k] = v
+		}
+	}
+}
+
+func ServerWithLogger(logger *slog.Logger) ServerOpt {
+	return func(s *Server) {
+		s.logger = logger
+	}
+}
+
+// ServerWithWrapLargeCounters configures wrapping counters at 2^53.
+func ServerWithWrapLargeCounters(wrap bool) ServerOpt {
+	return func(s *Server) {
+		s.wrapLargeCounters = wrap
+	}
+}
+
+// NewServer establishes a new connection using DSN.
+func NewServer(dsn string, opts ...ServerOpt) (*Server, error) {
+	fingerprint, err := Fingerprint(dsn)
+	if err != nil {
+		return nil, err
+	}
+
+	db, err := sql.Open("postgres", dsn)
+	if err != nil {
+		return nil, err
+	}
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+
+	s := &Server{
+		db:                db,
+		master:            false,
+		wrapLargeCounters: true,
+		labels: prometheus.Labels{
+			serverLabelName: fingerprint,
+		},
+		metricCache: make(map[string]cachedMetrics),
+		logger:      promslog.NewNopLogger(),
+	}
+
+	for _, opt := range opts {
+		opt(s)
+	}
+
+	s.logger.Debug("Established new database connection", "fingerprint", fingerprint)
+
+	return s, nil
+}
+
+// Close disconnects from Postgres.
+func (s *Server) Close() error {
+	return s.db.Close()
+}
+
+// Ping checks connection availability and possibly invalidates the connection if it fails.
+func (s *Server) Ping(ctx context.Context) error {
+	if err := s.db.PingContext(ctx); err != nil {
+		if cerr := s.Close(); cerr != nil {
+			s.logger.Error("Error while closing non-pinging DB connection", "server", s, "err", cerr)
+		}
+		return err
+	}
+	return nil
+}
+
+// String returns server's fingerprint.
+func (s *Server) String() string {
+	return s.labels[serverLabelName]
+}
+
+// Scrape loads metrics.
+func (s *Server) Scrape(ctx context.Context, ch chan<- prometheus.Metric) error {
+	s.mappingMtx.RLock()
+	defer s.mappingMtx.RUnlock()
+
+	return s.namespaceMappingsError(queryNamespaceMappings(ctx, ch, s))
+}
+
+// Servers contains a collection of servers to Postgres.
+type Servers struct {
+	m       sync.Mutex
+	servers map[string]*Server
+	opts    []ServerOpt
+}
+
+// NewServers creates a collection of servers to Postgres.
+func NewServers(opts ...ServerOpt) *Servers {
+	return &Servers{
+		servers: make(map[string]*Server),
+		opts:    opts,
+	}
+}
+
+// GetServer returns established connection from a collection.
+func (s *Servers) GetServer(ctx context.Context, dsn string) (*Server, error) {
+	s.m.Lock()
+	defer s.m.Unlock()
+	var err error
+	var ok bool
+	errCount := 0 // start at zero because we increment before doing work
+	retries := 1
+	var server *Server
+	for {
+		if errCount++; errCount > retries {
+			return nil, err
+		}
+		server, ok = s.servers[dsn]
+		if !ok {
+			server, err = NewServer(dsn, s.opts...)
+			if err != nil {
+				select {
+				case <-time.After(time.Duration(errCount) * time.Second):
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+				continue
+			}
+			s.servers[dsn] = server
+		}
+		if err = server.Ping(ctx); err != nil {
+			server.Close()
+			delete(s.servers, dsn)
+			select {
+			case <-time.After(time.Duration(errCount) * time.Second):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+			continue
+		}
+		break
+	}
+	return server, nil
+}
+
+// Close disconnects from all known servers.
+func (s *Servers) Close() {
+	s.m.Lock()
+	defer s.m.Unlock()
+	for _, server := range s.servers {
+		if err := server.Close(); err != nil {
+			server.logger.Error("Failed to close connection", "server", server, "err", err)
+		}
+	}
+}

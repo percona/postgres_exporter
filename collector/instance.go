@@ -14,52 +14,54 @@
 package collector
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"regexp"
-	"strings"
 
 	"github.com/blang/semver/v4"
-	"github.com/lib/pq"
-	"github.com/percona/postgres_exporter/internal/versioncache"
+	"github.com/percona/postgres_exporter/config"
 )
 
 type instance struct {
-	dsn     string
-	name    string
-	db      *sql.DB
-	version semver.Version
-}
-
-func newInstance(dsn string) (*instance, error) {
-	i := &instance{
-		dsn: dsn,
-	}
-
-	// "Create" a database handle to verify the DSN provided is valid.
-	// Open is not guaranteed to create a connection.
-	db, err := sql.Open("postgres", dsn)
-	if err != nil {
-		return nil, err
-	}
-	db.Close()
-
-	i.name, err = parseServerName(dsn)
-	if err != nil {
-		return nil, err
-	}
-	return i, nil
+	dsn               string
+	db                *sql.DB
+	version           semver.Version
+	database          string
+	wrapLargeCounters bool
+	// isAurora reports whether the server is Amazon Aurora PostgreSQL.
+	// Aurora-specific collectors return ErrNoData when it is false.
+	isAurora bool
 }
 
 // copy returns a copy of the instance.
 func (i *instance) copy() *instance {
 	return &instance{
-		dsn:  i.dsn,
-		name: i.name,
+		dsn:               i.dsn,
+		wrapLargeCounters: i.wrapLargeCounters,
 	}
 }
 
-func (i *instance) setup() error {
+// withDatabase returns a new, unconnected instance whose dsn points at
+// database instead of whichever database i's dsn originally targeted. It is
+// used to scrape a database discovered alongside i's own primary connection,
+// on the same PostgreSQL server.
+func (i *instance) withDatabase(database string) (*instance, error) {
+	dsn, err := config.NewDSN(i.dsn)
+	if err != nil {
+		return nil, fmt.Errorf("malformed dsn: %w", err)
+	}
+	other := &instance{
+		dsn:               dsn.WithDatabase(database).GetConnectionString(),
+		wrapLargeCounters: i.wrapLargeCounters,
+		// database is on the same PostgreSQL server as i, so it runs the same
+		// version; skip re-querying it over the new connection.
+		version: i.version,
+	}
+	return other, nil
+}
+
+func (i *instance) setup(ctx context.Context) error {
 	db, err := sql.Open("postgres", i.dsn)
 	if err != nil {
 		return err
@@ -68,11 +70,19 @@ func (i *instance) setup() error {
 	db.SetMaxIdleConns(1)
 	i.db = db
 
-	version, _, err := versioncache.GetVersion(i.db, i.name, queryVersion)
-	if err != nil {
-		return fmt.Errorf("error querying postgresql version: %w", err)
-	} else {
+	if i.version.EQ(semver.Version{}) {
+		version, err := i.cachedVersion(ctx)
+		if err != nil {
+			return fmt.Errorf("error querying postgresql version: %w", err)
+		}
 		i.version = version
+	}
+
+	// aurora_version() only exists on Amazon Aurora PostgreSQL. to_regproc
+	// returns NULL instead of raising an error when it is missing, so the
+	// check doesn't log errors on regular PostgreSQL servers.
+	if err := i.db.QueryRowContext(ctx, "SELECT current_database(), to_regproc('aurora_version') IS NOT NULL").Scan(&i.database, &i.isAurora); err != nil {
+		return fmt.Errorf("error querying current database: %w", err)
 	}
 	return nil
 }
@@ -82,7 +92,12 @@ func (i *instance) getDB() *sql.DB {
 }
 
 func (i *instance) Close() error {
-	return i.db.Close()
+	if i.db == nil {
+		return nil
+	}
+	err := i.db.Close()
+	i.db = nil
+	return err
 }
 
 // Regex used to get the "short-version" from the postgres version field.
@@ -90,64 +105,26 @@ func (i *instance) Close() error {
 var versionRegex = regexp.MustCompile(`^\w+ ((\d+)(\.\d+)?(\.\d+)?)`)
 var serverVersionRegex = regexp.MustCompile(`^((\d+)(\.\d+)?(\.\d+)?)`)
 
-func queryVersion(db *sql.DB, server string) (semver.Version, string, error) {
+func queryVersion(ctx context.Context, db *sql.DB) (semver.Version, error) {
 	var version string
-	err := db.QueryRow("SELECT version();").Scan(&version)
+	err := db.QueryRowContext(ctx, "SELECT version();").Scan(&version)
 	if err != nil {
-		return semver.Version{}, "", fmt.Errorf("error scanning version string on %q: %w", server, err)
+		return semver.Version{}, err
 	}
 	submatches := versionRegex.FindStringSubmatch(version)
 	if len(submatches) > 1 {
-		semanticVersion, err := semver.ParseTolerant(submatches[1])
-		return semanticVersion, version, err
+		return semver.ParseTolerant(submatches[1])
 	}
 
 	// We could also try to parse the version from the server_version field.
 	// This is of the format 13.3 (Debian 13.3-1.pgdg100+1)
-	err = db.QueryRow("SHOW server_version;").Scan(&version)
+	err = db.QueryRowContext(ctx, "SHOW server_version;").Scan(&version)
 	if err != nil {
-		return semver.Version{}, "", fmt.Errorf("error scanning server_version on %q: %w", server, err)
+		return semver.Version{}, err
 	}
 	submatches = serverVersionRegex.FindStringSubmatch(version)
 	if len(submatches) > 1 {
-		semanticVersion, err := semver.ParseTolerant(submatches[1])
-		return semanticVersion, version, err
+		return semver.ParseTolerant(submatches[1])
 	}
-	return semver.Version{}, "", fmt.Errorf("could not parse version from %q on %q", version, server)
-}
-
-func parseServerName(url string) (string, error) {
-	dsn, err := pq.ParseURL(url) //nolint:staticcheck
-	if err != nil {
-		dsn = url
-	}
-
-	pairs := strings.Split(dsn, " ")
-	kv := make(map[string]string, len(pairs))
-	for _, pair := range pairs {
-		splitted := strings.SplitN(pair, "=", 2)
-		if len(splitted) != 2 {
-			return "", fmt.Errorf("malformed dsn %q", dsn)
-		}
-		// Newer versions of pq.ParseURL quote values so trim them off if they exist
-		key := strings.Trim(splitted[0], "'\"")
-		value := strings.Trim(splitted[1], "'\"")
-		kv[key] = value
-	}
-
-	var fingerprint string
-
-	if host, ok := kv["host"]; ok {
-		fingerprint += host
-	} else {
-		fingerprint += "localhost"
-	}
-
-	if port, ok := kv["port"]; ok {
-		fingerprint += ":" + port
-	} else {
-		fingerprint += ":5432"
-	}
-
-	return fingerprint, nil
+	return semver.Version{}, fmt.Errorf("could not parse version from %q", version)
 }

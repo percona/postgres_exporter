@@ -15,23 +15,34 @@ package collector
 
 import (
 	"context"
+	"database/sql"
+	"log/slog"
+	"time"
 
-	"github.com/go-kit/log"
+	"github.com/percona/postgres_exporter/config"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-const longRunningTransactionsSubsystem = "long_running_transactions"
-
 func init() {
-	registerCollector(longRunningTransactionsSubsystem, defaultDisabled, NewPGLongRunningTransactionsCollector)
+	registerCollector(longRunningTransactionsSubsystem, serverScope, NewPerconaPGLongRunningTransactionsCollector)
 }
 
 type PGLongRunningTransactionsCollector struct {
-	log log.Logger
+	log       *slog.Logger
+	threshold time.Duration
 }
 
-func NewPGLongRunningTransactionsCollector(config collectorConfig) (Collector, error) {
-	return &PGLongRunningTransactionsCollector{log: config.logger}, nil
+func defaultLongRunningTransactionsConfig() config.LongRunningTransactionsConfig {
+	return config.LongRunningTransactionsConfig{
+		Threshold: config.DefaultLongRunningTransactionsThreshold,
+	}
+}
+
+func NewPGLongRunningTransactionsCollector(cfg collectorConfig) (Collector, error) {
+	return &PGLongRunningTransactionsCollector{
+		log:       cfg.logger,
+		threshold: cfg.longRunningTransactionsConfig.Threshold,
+	}, nil
 }
 
 var (
@@ -51,17 +62,22 @@ var (
 
 	longRunningTransactionsQuery = `
 	SELECT
-		COUNT(*) as transactions,
-   		MAX(EXTRACT(EPOCH FROM clock_timestamp())) AS oldest_timestamp_seconds
-    FROM pg_catalog.pg_stat_activity
-    WHERE state is distinct from 'idle' AND query not like 'autovacuum:%'
+    COUNT(*) as transactions,
+    MAX(EXTRACT(EPOCH FROM clock_timestamp() - pg_stat_activity.xact_start)) AS oldest_timestamp_seconds
+FROM pg_catalog.pg_stat_activity
+WHERE state IS DISTINCT FROM 'idle'
+AND (now() - pg_stat_activity.xact_start) > make_interval(secs => $1)
+AND query NOT LIKE 'autovacuum:%'
+AND pg_stat_activity.xact_start IS NOT NULL
+AND pid <> pg_backend_pid();
 	`
 )
 
-func (PGLongRunningTransactionsCollector) Update(ctx context.Context, instance *instance, ch chan<- prometheus.Metric) error {
+func (c PGLongRunningTransactionsCollector) Update(ctx context.Context, instance *instance, ch chan<- prometheus.Metric) error {
 	db := instance.getDB()
 	rows, err := db.QueryContext(ctx,
-		longRunningTransactionsQuery)
+		longRunningTransactionsQuery,
+		c.threshold.Seconds())
 
 	if err != nil {
 		return err
@@ -69,10 +85,18 @@ func (PGLongRunningTransactionsCollector) Update(ctx context.Context, instance *
 	defer rows.Close()
 
 	for rows.Next() {
-		var transactions, ageInSeconds float64
+		var transactions float64
+		var ageInSeconds sql.NullFloat64
 
 		if err := rows.Scan(&transactions, &ageInSeconds); err != nil {
 			return err
+		}
+
+		// If there are no long running transactions, ageInSeconds will be NULL
+		// so we set it to 0
+		age := 0.0
+		if ageInSeconds.Valid {
+			age = ageInSeconds.Float64
 		}
 
 		ch <- prometheus.MustNewConstMetric(
@@ -83,11 +107,9 @@ func (PGLongRunningTransactionsCollector) Update(ctx context.Context, instance *
 		ch <- prometheus.MustNewConstMetric(
 			longRunningTransactionsAgeInSeconds,
 			prometheus.GaugeValue,
-			ageInSeconds,
+			age,
 		)
 	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	return nil
+
+	return rows.Err()
 }

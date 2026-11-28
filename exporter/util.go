@@ -1,0 +1,240 @@
+// Copyright 2021 The Prometheus Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package exporter
+
+import (
+	"fmt"
+	"log/slog"
+	"math"
+	"net/url"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/percona/postgres_exporter/config"
+	"github.com/percona/postgres_exporter/internal/metricutil"
+)
+
+// convert a string to the corresponding ColumnUsage
+func stringToColumnUsage(s string) (ColumnUsage, error) {
+	var u ColumnUsage
+	var err error
+	switch s {
+	case "DISCARD":
+		u = DISCARD
+
+	case "LABEL":
+		u = LABEL
+
+	case "COUNTER":
+		u = COUNTER
+
+	case "GAUGE":
+		u = GAUGE
+
+	case "HISTOGRAM":
+		u = HISTOGRAM
+
+	case "MAPPEDMETRIC":
+		u = MAPPEDMETRIC
+
+	case "DURATION":
+		u = DURATION
+
+	default:
+		err = fmt.Errorf("wrong ColumnUsage given : %s", s)
+	}
+
+	return u, err
+}
+
+// Convert database.sql types to float64s for Prometheus consumption. Null types are mapped to NaN. string and []byte
+// types are mapped as NaN and !ok
+func dbToFloat64(t interface{}, logger *slog.Logger) (float64, bool) {
+	switch v := t.(type) {
+	case int64:
+		return float64(v), true
+	case float64:
+		return v, true
+	case time.Time:
+		return float64(v.Unix()), true
+	case []byte:
+		// Try and convert to string and then parse to a float64
+		strV := string(v)
+		result, err := strconv.ParseFloat(strV, 64)
+		if err != nil {
+			logger.Info("Could not parse []byte", "err", err)
+			return math.NaN(), false
+		}
+		return result, true
+	case string:
+		result, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			logger.Info("Could not parse string", "err", err)
+			return math.NaN(), false
+		}
+		return result, true
+	case bool:
+		if v {
+			return 1.0, true
+		}
+		return 0.0, true
+	case nil:
+		return math.NaN(), true
+	default:
+		return math.NaN(), false
+	}
+}
+
+// dbToFloat64Counter converts PostgreSQL counter values while preserving
+// single-unit precision for positive int64 values above float64's exact
+// integer range. Prometheus handles the modulo boundary as a counter reset.
+func dbToFloat64Counter(t interface{}, logger *slog.Logger) (float64, bool) {
+	if v, ok := t.(int64); ok {
+		return metricutil.Int64CounterValue(v, true), true
+	}
+
+	return dbToFloat64(t, logger)
+}
+
+// Convert database.sql types to uint64 for Prometheus consumption. Null types are mapped to 0. string and []byte
+// types are mapped as 0 and !ok
+func dbToUint64(t interface{}, logger *slog.Logger) (uint64, bool) {
+	switch v := t.(type) {
+	case uint64:
+		return v, true
+	case int64:
+		return uint64(v), true
+	case float64:
+		return uint64(v), true
+	case time.Time:
+		return uint64(v.Unix()), true
+	case []byte:
+		// Try and convert to string and then parse to a uint64
+		strV := string(v)
+		result, err := strconv.ParseUint(strV, 10, 64)
+		if err != nil {
+			logger.Info("Could not parse []byte", "err", err)
+			return 0, false
+		}
+		return result, true
+	case string:
+		result, err := strconv.ParseUint(v, 10, 64)
+		if err != nil {
+			logger.Info("Could not parse string", "err", err)
+			return 0, false
+		}
+		return result, true
+	case bool:
+		if v {
+			return 1, true
+		}
+		return 0, true
+	case nil:
+		return 0, true
+	default:
+		return 0, false
+	}
+}
+
+// Convert database.sql to string for Prometheus labels. Null types are mapped to empty strings.
+func dbToString(t interface{}) (string, bool) {
+	switch v := t.(type) {
+	case int64:
+		return fmt.Sprintf("%v", v), true
+	case float64:
+		return fmt.Sprintf("%v", v), true
+	case time.Time:
+		return fmt.Sprintf("%v", v.Unix()), true
+	case nil:
+		return "", true
+	case []byte:
+		// Try and convert to string
+		return string(v), true
+	case string:
+		return strings.ToValidUTF8(v, "�"), true
+	case bool:
+		if v {
+			return "true", true
+		}
+		return "false", true
+	default:
+		return "", false
+	}
+}
+
+func parseFingerprint(dsn string) (string, error) {
+	// Only postgres:// and postgresql:// are valid DSN URL schemes; anything
+	// else (e.g. a key=value DSN like "host=example port=1234") falls through
+	// to the key=value parser below.
+	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
+		u, err := url.Parse(dsn)
+		if err != nil {
+			return "", fmt.Errorf("malformed dsn")
+		}
+
+		host := u.Hostname()
+		if host == "" {
+			host = "localhost"
+		}
+
+		port := u.Port()
+		if port == "" {
+			port = "5432"
+		}
+
+		return host + ":" + port, nil
+	}
+
+	pairs := strings.Split(dsn, " ")
+	kv := make(map[string]string, len(pairs))
+	for _, pair := range pairs {
+		splitted := strings.SplitN(pair, "=", 2)
+		if len(splitted) != 2 {
+			return "", fmt.Errorf("malformed dsn")
+		}
+		key := strings.Trim(splitted[0], "'\"")
+		value := strings.Trim(splitted[1], "'\"")
+		kv[key] = value
+	}
+
+	var fingerprint string
+
+	if host, ok := kv["host"]; ok {
+		fingerprint += host
+	} else {
+		fingerprint += "localhost"
+	}
+
+	if port, ok := kv["port"]; ok {
+		fingerprint += ":" + port
+	} else {
+		fingerprint += ":5432"
+	}
+
+	return fingerprint, nil
+}
+
+// loggableDSN returns a redacted representation of dsn that is safe to log. Passwords are
+// stripped whether they are supplied in the URL user info, as a query parameter, or as a
+// key=value keyword. It never returns the original dsn, so an unparseable input is reported
+// without echoing it back.
+func loggableDSN(dsn string) string {
+	d, err := config.NewDSN(dsn)
+	if err != nil {
+		return "could not parse DATA_SOURCE_NAME"
+	}
+
+	return d.String()
+}
